@@ -1,0 +1,28 @@
+services:
+  audex-web:
+    build: .
+    image: ${AUDEX_WEB_IMAGE:-audex-web:latest}
+    container_name: audex-web
+    restart: unless-stopped
+    ports:
+      - "${AUDEX_WEB_PORT:-8420}:8000"
+    volumes:
+      - ${AUDEX_WEB_DATA_PATH:-./data}:/data
+    environment:
+      - ABS_URL=${ABS_URL:-}
+      - CODEX_URL=${CODEX_URL:-}
+      - CODEX_WEBHOOK_TOKEN=${CODEX_WEBHOOK_TOKEN:-}
+      - SECRET_KEY=${SECRET_KEY:?set a long random SECRET_KEY in .env}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-true}
+      - OIDC_ISSUER=${OIDC_ISSUER:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
+      - OIDC_INTERNAL_BASE=${OIDC_INTERNAL_BASE:-}
+      - DATABASE_URL=sqlite+aiosqlite:////data/audexweb.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
