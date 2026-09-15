@@ -5,6 +5,7 @@ import LinkAbs from "./pages/LinkAbs";
 import Library from "./pages/Library";
 import Login from "./pages/Login";
 import Player from "./pages/Player";
+import Settings from "./pages/Settings";
 
 // @readium/navigator + @readium/shared pull in ~330kB of code (ReadiumCSS
 // presets, the EPUB frame renderer) that Library and Player never touch —
@@ -57,6 +58,16 @@ export default function App() {
         }
       />
       <Route
+        path="/settings"
+        element={
+          !me ? (
+            <Navigate to="/login" replace />
+          ) : (
+            <Settings me={me} onChanged={refresh} onSignedOut={() => setMe(null)} />
+          )
+        }
+      />
+      <Route
         path="/*"
         element={
           !me ? (
@@ -64,7 +75,7 @@ export default function App() {
           ) : !me.absLinked ? (
             <Navigate to="/link-abs" replace />
           ) : (
-            <Library me={me} onSignedOut={() => setMe(null)} />
+            <Library />
           )
         }
       />

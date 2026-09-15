@@ -16,6 +16,8 @@ export interface Me {
   ssoLinked: boolean;
   absLinked: boolean;
   absUsername: string | null;
+  codexLinked: boolean;
+  codexConfigured: boolean; // whether the SERVER has a Codex instance set up at all
 }
 
 export interface Library {
@@ -105,6 +107,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     }),
+  linkCodex: (token: string) =>
+    request<{ ok: true }>("/api/auth/link/codex", { method: "POST", body: JSON.stringify({ token }) }),
+  unlinkCodex: () => request<{ ok: true }>("/api/auth/unlink/codex", { method: "POST" }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
 
   libraries: () => request<Library[]>("/api/library/libraries"),

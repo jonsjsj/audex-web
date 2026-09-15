@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_identity
-from app.core import abs_client
+from app.core import abs_client, codex_client
 from app.core.abs_client import AbsAuthError
 from app.core.config import oidc_active, settings
 from app.core.database import Identity, WebSession, get_db
@@ -102,6 +102,8 @@ async def me(identity: Identity = Depends(get_current_identity)):
         "ssoLinked": bool(identity.oidc_sub),
         "absLinked": bool(identity.abs_token_encrypted),
         "absUsername": identity.abs_username,
+        "codexLinked": bool(identity.codex_token_encrypted),
+        "codexConfigured": bool(settings.CODEX_URL),
     }
 
 
@@ -128,6 +130,39 @@ async def link_abs(
     identity.abs_token_encrypted = encrypt_value(abs_user["token"])
     await db.commit()
     return {"ok": True, "absUsername": identity.abs_username}
+
+
+class LinkCodexRequest(BaseModel):
+    token: str
+
+
+@router.post("/link/codex")
+async def link_codex(
+    body: LinkCodexRequest,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Optional, same as the mobile app's Settings → Codex sync: paste an API
+    key generated from Codex's own Settings → API Keys page. Verified against
+    Codex before saving, so a typo'd/expired key fails loudly here instead of
+    silently no-opping every future progress push."""
+    if not settings.CODEX_URL:
+        raise HTTPException(400, "This server hasn't been configured with a Codex instance (CODEX_URL).")
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(400, "Paste your Codex API key.")
+    if not await codex_client.verify_token(settings.CODEX_URL, token):
+        raise HTTPException(401, "Codex didn't accept that key — check it's current and try again.")
+    identity.codex_token_encrypted = encrypt_value(token)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/unlink/codex")
+async def unlink_codex(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
+    identity.codex_token_encrypted = None
+    await db.commit()
+    return {"ok": True}
 
 
 # ─── OIDC (Authentik SSO) ────────────────────────────────────────────────────

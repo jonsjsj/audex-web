@@ -584,3 +584,78 @@ input:focus {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Settings ─────────────────────────────────────────────────────────── */
+.settings {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding-bottom: 3rem;
+}
+.settings-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1.2rem 1.5rem 0.8rem;
+}
+.settings-back {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  padding: 0.3rem 0;
+  cursor: pointer;
+}
+.settings-title {
+  font-family: var(--serif);
+  font-weight: 680;
+  font-size: 1.3rem;
+  margin: 0;
+}
+.settings-section {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.settings-section-title {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.7rem;
+}
+.settings-help {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0 0 0.9rem;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0;
+}
+.settings-row-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.settings-row-sub {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.settings-codex-form {
+  display: flex;
+  gap: 0.5rem;
+}
+.settings-input {
+  flex: 1;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}

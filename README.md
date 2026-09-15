@@ -4,11 +4,12 @@ Self-hosted, browser version of [Audex](https://github.com/jonsjsj/codexaudio) �
 audio player, ebook reader, and word-sync read-along, syncing with your own
 Audiobookshelf server and (optionally) [Codex](https://github.com/jonsjsj/codex).
 
-Phases 0-2 of the plan are done: sign-in (SSO or Audiobookshelf credentials), the audio
-player (streaming, chapters, speed, sleep timer, resume, OS media controls), and now
-the ebook reader — an in-house EPUB parser (no @readium/* package actually unzips one)
-feeds a real @readium/navigator, with font size and position sync to ABS. Codex sync
-and read-along land in the phases after this one.
+Phases 0-3 of the plan are done: sign-in (SSO or Audiobookshelf credentials), the audio
+player (streaming, chapters, speed, sleep timer, resume, OS media controls), the ebook
+reader (an in-house EPUB parser feeding a real @readium/navigator, font size + position
+sync to ABS), and now Codex sync — link your own Codex API key from Settings and audio
+progress pushes to Codex's webhook in real time, the same call the mobile app makes.
+Read-along lands in the phase after this one.
 
 ## Run it
 
@@ -32,6 +33,14 @@ Open `http://localhost:8420` (or whatever `AUDEX_WEB_PORT` you set).
 Either way, the browser never receives an Audiobookshelf token or an OIDC client
 secret — see `backend/app/api/auth.py` for the session model.
 
+## Codex sync
+
+Set `CODEX_URL` to your Codex instance (server-wide — a household shares one Codex).
+Each signed-in person then links their OWN account from Settings: generate an API key
+in Codex (Settings → API Keys) and paste it in. This is per-person, not per-server, the
+same as the mobile app's own Settings → Codex sync — a single shared token would
+attribute everyone's progress to whichever one Codex account it belongs to.
+
 ## Development
 
 ```bash
@@ -48,9 +57,9 @@ SPA and API behave the same in dev as they do same-origin in the built container
 
 ## API
 
-`/api/health`, `/api/auth/*`, `/api/library/*` (libraries, items, item detail, cover
-proxy), `/api/play/*` (start/sync/close an ABS session), `/api/stream` (range-request
-audio proxy), `/api/read/*` (RWPM manifest, per-resource proxy, position get/save)
-today. See the plan (§4) for the full surface as later phases land: `/api/readalong`,
-`/api/progress` (which also pushes to Codex's webhook — the same call the Android app
-makes — so a web session shows up on Codex immediately).
+`/api/health`, `/api/auth/*` (including `/link/codex`, `/unlink/codex`), `/api/library/*`
+(libraries, items, item detail, cover proxy), `/api/play/*` (start/sync/close an ABS
+session — sync/close also push to Codex's webhook when linked), `/api/stream`
+(range-request audio proxy), `/api/read/*` (RWPM manifest, per-resource proxy, position
+get/save) today. See the plan (§4) for the full surface as the read-along phase lands:
+`/api/readalong`.

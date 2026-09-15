@@ -30,6 +30,14 @@ class Identity(Base):
     abs_username = Column(String, nullable=True)
     abs_token_encrypted = Column(String, nullable=True)
 
+    # Codex sync (Phase 3) is optional and per-person, same as the mobile app's
+    # own Settings → Codex sync — NOT a single server-wide token, or every
+    # identity's progress would get attributed to whichever one account that
+    # token belongs to (the exact cross-account bug class Codex's own ABS sync
+    # had to be fixed for). CODEX_URL (the instance) stays a server-wide
+    # setting since a household shares one Codex; the token doesn't.
+    codex_token_encrypted = Column(String, nullable=True)
+
     created_at = Column(Float, default=time.time)
 
 

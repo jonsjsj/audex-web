@@ -49,3 +49,13 @@ async def get_abs_token(identity: Identity = Depends(get_current_identity)) -> s
     if not token:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audiobookshelf connection is invalid — reconnect it.")
     return token
+
+
+async def get_codex_token(identity: Identity = Depends(get_current_identity)) -> str | None:
+    """Unlike get_abs_token, Codex sync is OPTIONAL — same as the mobile app,
+    where a blank/off Codex setting just no-ops the push rather than blocking
+    anything. Returns None (never raises) when not linked, so callers can
+    `if token:` instead of catching a 400 they'd have to ignore anyway."""
+    if not identity.codex_token_encrypted:
+        return None
+    return decrypt_value(identity.codex_token_encrypted) or None

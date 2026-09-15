@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Book, Library as LibraryModel, Me } from "../api/client";
+import { api, Book, Library as LibraryModel } from "../api/client";
 
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
@@ -9,7 +9,7 @@ function formatDuration(s: number | null): string | null {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-export default function Library({ me, onSignedOut }: { me: Me; onSignedOut: () => void }) {
+export default function Library() {
   const navigate = useNavigate();
   const [libraries, setLibraries] = useState<LibraryModel[] | null>(null);
   const [libraryId, setLibraryId] = useState<string | null>(null);
@@ -40,11 +40,6 @@ export default function Library({ me, onSignedOut }: { me: Me; onSignedOut: () =
     return () => clearTimeout(handle);
   }, [libraryId, search]);
 
-  async function signOut() {
-    await api.logout();
-    onSignedOut();
-  }
-
   return (
     <div className="lib">
       <header className="lib-head">
@@ -71,8 +66,8 @@ export default function Library({ me, onSignedOut }: { me: Me; onSignedOut: () =
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <button className="btn btn-secondary lib-signout" onClick={signOut}>
-            Sign out
+          <button className="btn btn-secondary lib-signout" onClick={() => navigate("/settings")}>
+            Settings
           </button>
         </div>
       </header>

@@ -12,9 +12,12 @@ class Settings(BaseSettings):
     # ── Audiobookshelf — the library + progress source of truth ────────────
     ABS_URL: str = ""  # e.g. http://192.168.68.250:13378 (LAN, server-side only)
 
-    # ── Codex — sync parity target (see the plan §4: /api/progress pushes here) ──
+    # ── Codex — sync parity target (see the plan §4: /api/progress pushes here).
+    # The instance URL is server-wide (a household shares one Codex); the token
+    # is NOT — it's per-identity (Identity.codex_token_encrypted, set via
+    # POST /api/auth/link/codex), same as the mobile app's own per-person
+    # Settings → Codex sync. ──
     CODEX_URL: str = ""  # e.g. https://codex.bellaybestia.no
-    CODEX_WEBHOOK_TOKEN: str = ""
 
     # ── audex-align gateway (read-along maps), reached via Codex or directly ──
     ALIGN_GATEWAY_URL: str = ""  # defaults to f"{CODEX_URL}/audex/align" when blank
