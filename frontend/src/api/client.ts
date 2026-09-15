@@ -63,6 +63,16 @@ export interface PlaySession {
   chapters: Chapter[];
 }
 
+// A Readium Web Publication Manifest — deliberately untyped (`unknown`) here.
+// It's handed straight to @readium/shared's Manifest.deserialize(), which
+// owns the real shape (https://readium.org/webpub-manifest/); duplicating
+// that as a TS interface would just be a second copy to keep in sync.
+export type ReadiumManifest = Record<string, unknown>;
+
+// Same reasoning: a Readium Locator, straight to/from Locator.deserialize()/
+// .serialize() — see @readium/shared's own Locator.ts for the real shape.
+export type ReadiumLocator = Record<string, unknown>;
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -109,6 +119,12 @@ export const api = {
     request<{ ok: true }>(`/api/play/${itemId}/sync`, { method: "POST", body: JSON.stringify(body) }),
   close: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>
     request<{ ok: true }>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
+
+  readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
+  readPosition: (itemId: string) =>
+    request<{ locator: ReadiumLocator | null }>(`/api/read/${itemId}/position`),
+  saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }) =>
+    request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
 };
 
 export { ApiError };

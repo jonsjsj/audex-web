@@ -152,3 +152,48 @@ def stream_url(path: str) -> str:
     `/api/items/<id>/file/<ino>`), as returned verbatim by start_play() — the
     frontend never constructs this itself, only replays what ABS gave it."""
     return f"{_base()}{path}"
+
+
+# ─── Ebook reading (Phase 2) ────────────────────────────────────────────────
+
+async def ebook_file(token: str, item_id: str) -> bytes:
+    """Downloads the item's primary ebook file's raw bytes. There's no dedicated
+    "/ebook" endpoint — audiobooks and ebooks are both served the same way, by
+    the file's `ino` off the expanded item (matching audio's own contentUrl
+    shape, `/api/items/<id>/file/<ino>` — see stream_url() above)."""
+    detail = await item_detail(token, item_id)
+    ebook_file_meta = (detail.get("media") or {}).get("ebookFile")
+    ino = ebook_file_meta.get("ino") if ebook_file_meta else None
+    if not ino:
+        raise AbsError("This item has no ebook file.")
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(f"{_base()}/api/items/{item_id}/file/{ino}", headers=_auth(token))
+    if r.status_code != 200:
+        raise AbsError("Couldn't download this book's ebook file.")
+    return r.content
+
+
+async def get_progress(token: str, item_id: str) -> dict | None:
+    """GET /api/me/progress/{id} → the saved MediaProgress record (`ebookLocation`,
+    `ebookProgress`, …), or None if this item has never been opened. 404 is the
+    normal "no progress yet" response, not an error."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_base()}/api/me/progress/{item_id}", headers=_auth(token))
+    if r.status_code == 404:
+        return None
+    if r.status_code != 200:
+        raise AbsError("Couldn't load your reading position for this book.")
+    return r.json()
+
+
+async def save_ebook_progress(token: str, item_id: str, *, ebook_location: str, ebook_progress: float) -> None:
+    """PATCH /api/me/progress/{id} — the sanctioned channel for EBOOK position
+    specifically (audio position goes through /api/session/{id}/sync instead —
+    see sync_session() above; PATCHing an audio position is known not to take
+    reliably). Best-effort: a failed save shouldn't interrupt reading, the
+    frontend just retries on the next position-changed event."""
+    body = {"ebookLocation": ebook_location, "ebookProgress": max(0.0, min(1.0, ebook_progress))}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.patch(f"{_base()}/api/me/progress/{item_id}", headers=_auth(token), json=body)
+    if r.status_code != 200:
+        raise AbsError("Couldn't save your reading position.")

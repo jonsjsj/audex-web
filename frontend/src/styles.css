@@ -231,11 +231,15 @@ input:focus {
   gap: 1.4rem;
   padding: 1.6rem 1.5rem;
 }
+.lib-card-wrap {
+  position: relative;
+}
 .lib-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.15rem;
+  width: 100%;
   background: none;
   border: none;
   padding: 0;
@@ -243,6 +247,25 @@ input:focus {
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+}
+.lib-read-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+  color: var(--surface);
+  border: none;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  padding: 0.28rem 0.6rem;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+.lib-read-badge:hover {
+  background: var(--accent);
+  color: #201400;
 }
 .lib-cover {
   width: 100%;
@@ -441,4 +464,123 @@ input:focus {
   font-family: var(--mono);
   font-size: 0.76rem;
   color: var(--muted);
+}
+
+/* ── Reader ───────────────────────────────────────────────────────────── */
+.reader-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  outline: none; /* focusable for arrow-key paging, but no focus ring on the page shell itself */
+}
+.reader-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.reader-back {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  padding: 0.3rem 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reader-head-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-book-title {
+  font-weight: 680;
+}
+.reader-chapter-title {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.85rem;
+}
+.reader-head-right {
+  display: flex;
+  gap: 0.3rem;
+  flex: none;
+}
+.reader-font-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+}
+.reader-font-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.reader-frame-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.reader-frame {
+  flex: 1;
+  min-width: 0;
+}
+/* @readium/navigator mounts an iframe (or two, for a two-page spread) into
+   this container itself — sized here, not by the iframe's own attributes. */
+.reader-frame iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+.reader-nav-edge {
+  flex: none;
+  width: 2.6rem;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.6rem;
+  cursor: pointer;
+}
+.reader-nav-edge:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.reader-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+.reader-progress-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.reader-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.reader-progress-pct {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

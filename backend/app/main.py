@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, library, play
+from app.api import auth, library, play, read
 from app.core.config import oidc_active, settings
 from app.core.database import init_db
 
@@ -25,6 +25,7 @@ app.include_router(auth.router)
 app.include_router(library.router)
 app.include_router(play.router)
 app.include_router(play.stream_router)
+app.include_router(read.router)
 
 
 @app.get("/api/health")

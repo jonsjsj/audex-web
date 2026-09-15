@@ -89,17 +89,40 @@ export default function Library({ me, onSignedOut }: { me: Me; onSignedOut: () =
 
       {books && books.length > 0 && (
         <div className="lib-grid">
-          {books.map((b) => (
-            <button key={b.id} className="lib-card" onClick={() => navigate(`/play/${b.id}`)}>
-              <div className="lib-cover">
-                <img src={b.coverUrl} alt="" loading="lazy" />
+          {books.map((b) => {
+            const hasAudio = b.numAudioFiles > 0;
+            // A book with only one format opens directly; one with both opens
+            // Listen by default (audio is the more common "resume where I was"
+            // action for a library synced from an audiobook-first server) with
+            // an explicit Read affordance alongside it, rather than guessing.
+            const primaryHref = hasAudio ? `/play/${b.id}` : `/read/${b.id}`;
+            return (
+              <div key={b.id} className="lib-card-wrap">
+                {/* A <button> can't contain another focusable element (invalid
+                    HTML, and the browser will hoist it out of the DOM tree
+                    unpredictably) — the Read badge is a sibling button
+                    absolutely positioned over the cover by CSS, not nested. */}
+                <button className="lib-card" onClick={() => navigate(primaryHref)}>
+                  <div className="lib-cover">
+                    <img src={b.coverUrl} alt="" loading="lazy" />
+                  </div>
+                  <div className="lib-title">{b.title}</div>
+                  {b.author && <div className="lib-author">{b.author}</div>}
+                  {b.series && <div className="lib-series">{b.series}</div>}
+                  {formatDuration(b.durationS) && <div className="lib-duration">{formatDuration(b.durationS)}</div>}
+                </button>
+                {hasAudio && b.hasEbook && (
+                  <button
+                    className="lib-read-badge"
+                    aria-label={`Read ${b.title}`}
+                    onClick={() => navigate(`/read/${b.id}`)}
+                  >
+                    Read
+                  </button>
+                )}
               </div>
-              <div className="lib-title">{b.title}</div>
-              {b.author && <div className="lib-author">{b.author}</div>}
-              {b.series && <div className="lib-series">{b.series}</div>}
-              {formatDuration(b.durationS) && <div className="lib-duration">{formatDuration(b.durationS)}</div>}
-            </button>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -1,10 +1,15 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api, Me } from "./api/client";
 import LinkAbs from "./pages/LinkAbs";
 import Library from "./pages/Library";
 import Login from "./pages/Login";
 import Player from "./pages/Player";
+
+// @readium/navigator + @readium/shared pull in ~330kB of code (ReadiumCSS
+// presets, the EPUB frame renderer) that Library and Player never touch —
+// lazy so opening a book to LISTEN doesn't pay for the reader's weight.
+const Reader = lazy(() => import("./pages/Reader"));
 
 export default function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = loading
@@ -35,6 +40,20 @@ export default function App() {
         path="/play/:itemId"
         element={
           !me ? <Navigate to="/login" replace /> : !me.absLinked ? <Navigate to="/link-abs" replace /> : <Player />
+        }
+      />
+      <Route
+        path="/read/:itemId"
+        element={
+          !me ? (
+            <Navigate to="/login" replace />
+          ) : !me.absLinked ? (
+            <Navigate to="/link-abs" replace />
+          ) : (
+            <Suspense fallback={null}>
+              <Reader />
+            </Suspense>
+          )
         }
       />
       <Route
