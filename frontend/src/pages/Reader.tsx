@@ -151,6 +151,25 @@ export default function Reader() {
     else if (e.key === "ArrowLeft" || e.key === "PageUp") prevPage();
   }
 
+  const [discarding, setDiscarding] = useState(false);
+  async function discardProgress() {
+    if (!itemId) return;
+    if (!window.confirm("Discard your progress on this book? This can't be undone.")) return;
+    setDiscarding(true);
+    try {
+      // Cancel whatever's pending BEFORE discarding — the debounce timer or
+      // the unmount-flush below firing afterward would PATCH the position
+      // straight back, resurrecting what was just cleared.
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      pendingLocatorRef.current = null;
+      await api.discardReadProgress(itemId);
+      navigate("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't discard progress.");
+      setDiscarding(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="reader-wrap">
@@ -178,6 +197,9 @@ export default function Reader() {
           </button>
           <button className="reader-font-btn" onClick={() => changeFontSize(1)} aria-label="Larger text" disabled={fontSizeIdx === FONT_SIZES.length - 1}>
             A+
+          </button>
+          <button className="reader-font-btn" onClick={discardProgress} disabled={discarding} aria-label="Discard progress">
+            {discarding ? "…" : "⟲"}
           </button>
         </div>
       </header>

@@ -197,3 +197,23 @@ async def save_ebook_progress(token: str, item_id: str, *, ebook_location: str, 
         r = await client.patch(f"{_base()}/api/me/progress/{item_id}", headers=_auth(token), json=body)
     if r.status_code != 200:
         raise AbsError("Couldn't save your reading position.")
+
+
+async def delete_progress(token: str, item_id: str) -> None:
+    """Wipes this item's progress in ABS — audio position, ebook position, and
+    the finished flag alike, since it's one shared record. The ONLY reliable
+    way to clear stuck/wrong progress: a PATCH to zero is known not to stick
+    (ABS keeps the old currentTime/isFinished around regardless).
+
+    DELETE is keyed on the progress record's OWN `id`, not the libraryItemId —
+    deleting by libraryItemId 404s. get_progress()'s GET-by-libraryItemId
+    convenience route is how that record id is found in the first place; a
+    404 there means there's genuinely nothing to discard, not an error."""
+    prog = await get_progress(token, item_id)
+    record_id = prog.get("id") if prog else None
+    if not record_id:
+        return
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.delete(f"{_base()}/api/me/progress/{record_id}", headers=_auth(token))
+    if r.status_code not in (200, 204):
+        raise AbsError("Couldn't clear this book's progress.")

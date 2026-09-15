@@ -128,3 +128,17 @@ async def save_position(item_id: str, body: SavePositionBody, token: str = Depen
     except AbsError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
+
+
+@router.delete("/{item_id}/position")
+async def discard_position(item_id: str, token: str = Depends(get_abs_token)):
+    """Discard ebook progress — see play.py's discard_progress for the audio
+    side; each format's own progress can be wrong independently (ABS keeps
+    them on the SAME record, but a book bought as audio-only vs ebook-only
+    never shares one, so there's no cross-format entanglement to worry about
+    here the way the mobile app's cross-edition model has to)."""
+    try:
+        await abs_client.delete_progress(token, item_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True}

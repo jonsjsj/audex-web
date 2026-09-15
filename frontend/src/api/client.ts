@@ -124,12 +124,16 @@ export const api = {
     request<{ ok: true }>(`/api/play/${itemId}/sync`, { method: "POST", body: JSON.stringify(body) }),
   close: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>
     request<{ ok: true }>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
+  discardAudioProgress: (itemId: string) =>
+    request<{ ok: true }>(`/api/play/${itemId}/progress`, { method: "DELETE" }),
 
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
     request<{ locator: ReadiumLocator | null }>(`/api/read/${itemId}/position`),
   saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
+  discardReadProgress: (itemId: string) =>
+    request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "DELETE" }),
 };
 
 export { ApiError };

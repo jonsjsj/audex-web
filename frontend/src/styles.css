@@ -465,6 +465,25 @@ input:focus {
   font-size: 0.76rem;
   color: var(--muted);
 }
+.player-discard {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  text-align: center;
+  padding: 1.4rem 0 0.4rem;
+  cursor: pointer;
+}
+.player-discard:hover {
+  color: var(--danger);
+}
+.player-discard:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
 /* ── Reader ───────────────────────────────────────────────────────────── */
 .reader-wrap {

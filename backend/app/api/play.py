@@ -96,6 +96,17 @@ async def close(
     return {"ok": True}
 
 
+@router.delete("/{item_id}/progress")
+async def discard_progress(item_id: str, token: str = Depends(get_abs_token)):
+    """Discard audiobook progress — the same "wipe it, don't try to PATCH it
+    to zero" fix the mobile app uses for a stuck/wrong position."""
+    try:
+        await abs_client.delete_progress(token, item_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True}
+
+
 @stream_router.get("")
 async def stream(request: Request, path: str = Query(...), token: str = Depends(get_abs_token)):
     """Proxies one audio track's bytes from ABS, forwarding the client's Range

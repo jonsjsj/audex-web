@@ -260,6 +260,25 @@ export default function Player() {
     setSleepRemainingS(minutes > 0 ? minutes * 60 : null);
   }
 
+  const [discarding, setDiscarding] = useState(false);
+  async function discardProgress() {
+    if (!itemId) return;
+    if (!window.confirm("Discard your progress on this audiobook? This can't be undone.")) return;
+    setDiscarding(true);
+    try {
+      // Stop first — a still-playing session would just write its position
+      // straight back on the next sync tick, resurrecting what was just
+      // wiped (the same reasoning the mobile app's own discard flow uses).
+      audioRef.current?.pause();
+      stateRef.current.sessionId = ""; // suppresses the periodic sync effect and pagehide/unmount close
+      await api.discardAudioProgress(itemId);
+      navigate("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't discard progress.");
+      setDiscarding(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="player-wrap">
@@ -353,6 +372,10 @@ export default function Player() {
           ))}
         </div>
       )}
+
+      <button className="player-discard" onClick={discardProgress} disabled={discarding}>
+        {discarding ? "Discarding…" : "Discard audiobook progress"}
+      </button>
 
       <audio
         ref={audioRef}
