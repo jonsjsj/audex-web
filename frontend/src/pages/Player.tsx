@@ -346,22 +346,35 @@ export default function Player() {
       {currentChapter && <p className="player-chapter">{currentChapter.title}</p>}
 
       <div className="player-scrub">
-        <input
-          type="range"
-          min={0}
-          max={session.durationS || 1}
-          step={1}
-          value={shown}
-          onChange={(e) => setScrubbing(Number(e.target.value))}
-          onMouseUp={() => {
-            if (scrubbing !== null) seekTo(scrubbing);
-            setScrubbing(null);
-          }}
-          onTouchEnd={() => {
-            if (scrubbing !== null) seekTo(scrubbing);
-            setScrubbing(null);
-          }}
-        />
+        <div className="player-scrub-track">
+          <input
+            type="range"
+            min={0}
+            max={session.durationS || 1}
+            step={1}
+            value={shown}
+            onChange={(e) => setScrubbing(Number(e.target.value))}
+            onMouseUp={() => {
+              if (scrubbing !== null) seekTo(scrubbing);
+              setScrubbing(null);
+            }}
+            onTouchEnd={() => {
+              if (scrubbing !== null) seekTo(scrubbing);
+              setScrubbing(null);
+            }}
+          />
+          {/* One tick per chapter BOUNDARY, not per chapter — the first
+              chapter's own start is 0, the very edge of the track, not a
+              meaningful mark. pointer-events:none (see CSS) so this overlay
+              never steals the drag from the range input underneath it. */}
+          {session.chapters.length > 1 && session.durationS > 0 && (
+            <div className="player-scrub-ticks">
+              {session.chapters.slice(1).map((c) => (
+                <div key={c.id} className="player-scrub-tick" style={{ left: `${(c.startS / session.durationS) * 100}%` }} />
+              ))}
+            </div>
+          )}
+        </div>
         <div className="player-times">
           <span>{formatTime(shown)}</span>
           <span>-{formatTime(session.durationS - shown)}</span>

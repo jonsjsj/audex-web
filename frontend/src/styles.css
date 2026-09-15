@@ -380,9 +380,29 @@ input:focus {
 .player-scrub {
   margin-top: 1.4rem;
 }
+.player-scrub-track {
+  position: relative;
+}
 .player-scrub input[type="range"] {
+  position: relative; /* stacks above .player-scrub-ticks so dragging still works */
+  z-index: 1;
   width: 100%;
   accent-color: var(--accent);
+}
+.player-scrub-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* an overlay, never steals the drag from the range input */
+}
+.player-scrub-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  opacity: 0.8;
+  border-radius: 1px;
 }
 .player-times {
   display: flex;
