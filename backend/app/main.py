@@ -9,6 +9,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import auth, library, play, read
+# Aliased: app.api.settings (this router) vs app.core.config.settings (the
+# Settings instance imported right below) would otherwise collide on the
+# same name in this module's namespace.
+from app.api import settings as settings_api
 from app.core.config import oidc_active, settings
 from app.core.database import init_db
 
@@ -26,6 +30,7 @@ app.include_router(library.router)
 app.include_router(play.router)
 app.include_router(play.stream_router)
 app.include_router(read.router)
+app.include_router(settings_api.router)
 
 
 @app.get("/api/health")

@@ -72,12 +72,18 @@ export default function Player() {
   useEffect(() => {
     if (!itemId) return;
     let cancelled = false;
-    Promise.all([api.item(itemId), api.play(itemId), api.bookmarks(itemId).catch(() => [])])
-      .then(([b, s, marks]) => {
+    Promise.all([
+      api.item(itemId),
+      api.play(itemId),
+      api.bookmarks(itemId).catch(() => []),
+      api.settings().catch(() => null),
+    ])
+      .then(([b, s, marks, prefs]) => {
         if (cancelled) return;
         setBook(b);
         setSession(s);
         setBookmarks(marks);
+        if (prefs) setSpeed(prefs.playbackSpeed);
         stateRef.current.sessionId = s.sessionId;
         stateRef.current.durationS = s.durationS;
         const { index, withinS } = locate(s.tracks, s.currentTimeS);
@@ -254,6 +260,7 @@ export default function Player() {
     const next = speeds[(speeds.indexOf(speed) + 1) % speeds.length];
     setSpeed(next);
     if (audioRef.current) audioRef.current.playbackRate = next;
+    api.updateSettings({ playbackSpeed: next }).catch(() => {});
   }
 
   function cycleSleep() {

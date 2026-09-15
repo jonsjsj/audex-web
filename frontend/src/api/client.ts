@@ -74,6 +74,11 @@ export interface Bookmark {
   createdAt: number | null;
 }
 
+export interface UserPrefs {
+  playbackSpeed: number;
+  readerFontSize: number;
+}
+
 // A Readium Web Publication Manifest — deliberately untyped (`unknown`) here.
 // It's handed straight to @readium/shared's Manifest.deserialize(), which
 // owns the real shape (https://readium.org/webpub-manifest/); duplicating
@@ -148,6 +153,10 @@ export const api = {
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
   discardReadProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "DELETE" }),
+
+  settings: () => request<UserPrefs>("/api/settings"),
+  updateSettings: (body: Partial<UserPrefs>) =>
+    request<UserPrefs>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
 };
 
 export { ApiError };

@@ -34,11 +34,26 @@ export default function Reader() {
 
     async function open() {
       try {
-        const [manifestJson, positionRes] = await Promise.all([
+        const [manifestJson, positionRes, prefs] = await Promise.all([
           api.readManifest(itemId!),
           api.readPosition(itemId!),
+          api.settings().catch(() => null),
         ]);
         if (cancelled) return;
+
+        // A LOCAL var, not the fontSizeIdx STATE — this effect only runs once
+        // per itemId (mount), so the closure below would otherwise always
+        // construct with whatever fontSizeIdx was at mount time (the
+        // hardcoded default), never a preference loaded within this same
+        // async call. setFontSizeIdx (after construction, below) syncs the
+        // UI's A-/A+ buttons to match what was actually applied.
+        let initialFontIdx = 1;
+        if (prefs) {
+          initialFontIdx = FONT_SIZES.reduce(
+            (best, size, i) => (Math.abs(size - prefs.readerFontSize) < Math.abs(FONT_SIZES[best] - prefs.readerFontSize) ? i : best),
+            0,
+          );
+        }
 
         const manifest = Manifest.deserialize(manifestJson);
         if (!manifest) throw new Error("This book's manifest couldn't be read.");
@@ -81,7 +96,7 @@ export default function Reader() {
           listeners,
           positions,
           initialLocator,
-          { preferences: new EpubPreferences({ fontSize: FONT_SIZES[fontSizeIdx] }), defaults: {} },
+          { preferences: new EpubPreferences({ fontSize: FONT_SIZES[initialFontIdx] }), defaults: {} },
         );
         await nav.load();
         if (cancelled) {
@@ -89,6 +104,7 @@ export default function Reader() {
           return;
         }
         navRef.current = nav;
+        setFontSizeIdx(initialFontIdx);
         setLoading(false);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't open this book.");
@@ -144,6 +160,7 @@ export default function Reader() {
     if (idx === fontSizeIdx || !navRef.current) return;
     setFontSizeIdx(idx);
     await navRef.current.submitPreferences(new EpubPreferences({ fontSize: FONT_SIZES[idx] }));
+    api.updateSettings({ readerFontSize: FONT_SIZES[idx] }).catch(() => {});
   }
 
   function onKeyDown(e: React.KeyboardEvent) {

@@ -55,12 +55,20 @@ class WebSession(Base):
 class UserSettings(Base):
     """Per-identity preferences that mirror the Android app's Settings screen
     (read-along toggle, notifications) — populated from Phase 5 onward; the table
-    exists from the start so the migration story stays simple."""
+    exists from the start so the migration story stays simple.
+
+    playback_speed/reader_font_size (Phase 5): so re-opening a book doesn't
+    reset to 1x/100% every time — the mobile app remembers these too. Global
+    per-person, not per-book: matches the mobile app's own single Settings
+    value rather than a per-book preference, simpler and it's what a listener
+    who always prefers 1.5x actually wants."""
     __tablename__ = "user_settings"
 
     identity_id = Column(Integer, ForeignKey("identities.id"), primary_key=True)
     read_along = Column(Boolean, default=True)
     notify_readalong = Column(Boolean, default=True)
+    playback_speed = Column(Float, default=1.0)
+    reader_font_size = Column(Float, default=100.0)
 
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
