@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, BookDetail, PlaySession } from "../api/client";
+import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 
 const SKIP_S = 30;
 const SYNC_INTERVAL_MS = 15_000;
@@ -49,6 +49,8 @@ export default function Player() {
   const [sleepIdx, setSleepIdx] = useState(0);
   const [sleepRemainingS, setSleepRemainingS] = useState<number | null>(null);
   const [scrubbing, setScrubbing] = useState<number | null>(null);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [addingBookmark, setAddingBookmark] = useState(false);
 
   // Mutable session bookkeeping that effects need without re-subscribing.
   const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0 });
@@ -70,11 +72,12 @@ export default function Player() {
   useEffect(() => {
     if (!itemId) return;
     let cancelled = false;
-    Promise.all([api.item(itemId), api.play(itemId)])
-      .then(([b, s]) => {
+    Promise.all([api.item(itemId), api.play(itemId), api.bookmarks(itemId).catch(() => [])])
+      .then(([b, s, marks]) => {
         if (cancelled) return;
         setBook(b);
         setSession(s);
+        setBookmarks(marks);
         stateRef.current.sessionId = s.sessionId;
         stateRef.current.durationS = s.durationS;
         const { index, withinS } = locate(s.tracks, s.currentTimeS);
@@ -260,6 +263,32 @@ export default function Player() {
     setSleepRemainingS(minutes > 0 ? minutes * 60 : null);
   }
 
+  async function addBookmark() {
+    if (!itemId || addingBookmark) return;
+    setAddingBookmark(true);
+    const timeS = positionRef.current;
+    const title = `Left off · ${formatTime(timeS)}`;
+    try {
+      await api.addBookmark(itemId, { timeS, title });
+      setBookmarks((prev) => [...prev, { timeS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save bookmark.");
+    } finally {
+      setAddingBookmark(false);
+    }
+  }
+
+  async function removeBookmark(timeS: number) {
+    if (!itemId) return;
+    const prev = bookmarks;
+    setBookmarks(prev.filter((b) => b.timeS !== timeS)); // optimistic — a failed delete is rare and low-stakes to retry
+    try {
+      await api.removeBookmark(itemId, timeS);
+    } catch {
+      setBookmarks(prev);
+    }
+  }
+
   const [discarding, setDiscarding] = useState(false);
   async function discardProgress() {
     if (!itemId) return;
@@ -353,7 +382,34 @@ export default function Player() {
           <span className="v">{sleepRemainingS !== null ? formatTime(sleepRemainingS) : "Off"}</span>
           <span className="l">SLEEP</span>
         </button>
+        <button className="player-util-cell" onClick={addBookmark} disabled={addingBookmark}>
+          <span className="v">{addingBookmark ? "…" : "+"}</span>
+          <span className="l">BOOKMARK</span>
+        </button>
       </div>
+
+      {bookmarks.length > 0 && (
+        <div className="player-chapters">
+          <div className="l" style={{ marginBottom: ".5rem" }}>
+            BOOKMARKS
+          </div>
+          {bookmarks.map((bm) => (
+            <div key={bm.timeS} className="player-chapter-row player-bookmark-row">
+              <button className="player-bookmark-jump" onClick={() => seekTo(bm.timeS)}>
+                <span>{bm.title}</span>
+                <span className="t">{formatTime(bm.timeS)}</span>
+              </button>
+              <button
+                className="player-bookmark-remove"
+                onClick={() => removeBookmark(bm.timeS)}
+                aria-label={`Remove bookmark at ${formatTime(bm.timeS)}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {session.chapters.length > 0 && (
         <div className="player-chapters">

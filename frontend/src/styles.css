@@ -486,6 +486,38 @@ input:focus {
   font-size: 0.76rem;
   color: var(--muted);
 }
+.player-bookmark-row {
+  cursor: default; /* the row itself isn't clickable — its two buttons are */
+  align-items: center;
+  gap: 0.6rem;
+}
+.player-bookmark-jump {
+  display: flex;
+  justify-content: space-between;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--sans);
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.player-bookmark-remove {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.2rem 0.3rem;
+  cursor: pointer;
+}
+.player-bookmark-remove:hover {
+  color: var(--danger);
+}
 .player-discard {
   display: block;
   width: 100%;

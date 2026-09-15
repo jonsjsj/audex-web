@@ -199,6 +199,42 @@ async def save_ebook_progress(token: str, item_id: str, *, ebook_location: str, 
         raise AbsError("Couldn't save your reading position.")
 
 
+# ─── Bookmarks ──────────────────────────────────────────────────────────────
+# NOTE on confidence: unlike everything above, these three write endpoints
+# are NOT independently confirmed against a live server this session (no
+# ABS access here) — only the DATA SHAPE is (real /api/me responses seen
+# earlier this project show `bookmarks: [{libraryItemId, time, title,
+# createdAt}]` on the user record, alongside mediaProgress). The write paths
+# below follow ABS's established `/api/me/item/{id}/...` convention (matching
+# how progress and everything else under /api/me is shaped), but if they're
+# wrong, callers get a clean AbsError, not a crash — see play.py's handling.
+
+async def list_bookmarks(token: str, item_id: str) -> list[dict]:
+    """Bookmarks live on the user record (me()'s `bookmarks` array), not a
+    per-item endpoint — same place mediaProgress does."""
+    m = await me(token)
+    all_bookmarks = (m or {}).get("bookmarks") or []
+    return sorted(
+        (b for b in all_bookmarks if b.get("libraryItemId") == item_id),
+        key=lambda b: b.get("time", 0),
+    )
+
+
+async def add_bookmark(token: str, item_id: str, *, time_s: float, title: str) -> None:
+    body = {"time": round(time_s), "title": title}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"{_base()}/api/me/item/{item_id}/bookmark", headers=_auth(token), json=body)
+    if r.status_code != 200:
+        raise AbsError("Couldn't save that bookmark.")
+
+
+async def delete_bookmark(token: str, item_id: str, time_s: int) -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.delete(f"{_base()}/api/me/item/{item_id}/bookmark/{time_s}", headers=_auth(token))
+    if r.status_code not in (200, 204, 404):
+        raise AbsError("Couldn't delete that bookmark.")
+
+
 async def delete_progress(token: str, item_id: str) -> None:
     """Wipes this item's progress in ABS — audio position, ebook position, and
     the finished flag alike, since it's one shared record. The ONLY reliable

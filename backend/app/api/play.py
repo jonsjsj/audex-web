@@ -107,6 +107,38 @@ async def discard_progress(item_id: str, token: str = Depends(get_abs_token)):
     return {"ok": True}
 
 
+@router.get("/{item_id}/bookmarks")
+async def list_bookmarks(item_id: str, token: str = Depends(get_abs_token)):
+    try:
+        bookmarks = await abs_client.list_bookmarks(token, item_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    return [{"timeS": b.get("time", 0), "title": b.get("title", ""), "createdAt": b.get("createdAt")} for b in bookmarks]
+
+
+class AddBookmarkBody(BaseModel):
+    timeS: float
+    title: str
+
+
+@router.post("/{item_id}/bookmarks")
+async def add_bookmark(item_id: str, body: AddBookmarkBody, token: str = Depends(get_abs_token)):
+    try:
+        await abs_client.add_bookmark(token, item_id, time_s=body.timeS, title=body.title or "Bookmark")
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True}
+
+
+@router.delete("/{item_id}/bookmarks/{time_s}")
+async def remove_bookmark(item_id: str, time_s: int, token: str = Depends(get_abs_token)):
+    try:
+        await abs_client.delete_bookmark(token, item_id, time_s)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True}
+
+
 @stream_router.get("")
 async def stream(request: Request, path: str = Query(...), token: str = Depends(get_abs_token)):
     """Proxies one audio track's bytes from ABS, forwarding the client's Range

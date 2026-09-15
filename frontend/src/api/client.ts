@@ -68,6 +68,12 @@ export interface PlaySession {
   chapters: Chapter[];
 }
 
+export interface Bookmark {
+  timeS: number;
+  title: string;
+  createdAt: number | null;
+}
+
 // A Readium Web Publication Manifest — deliberately untyped (`unknown`) here.
 // It's handed straight to @readium/shared's Manifest.deserialize(), which
 // owns the real shape (https://readium.org/webpub-manifest/); duplicating
@@ -129,6 +135,11 @@ export const api = {
     request<{ ok: true }>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
   discardAudioProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/play/${itemId}/progress`, { method: "DELETE" }),
+  bookmarks: (itemId: string) => request<Bookmark[]>(`/api/play/${itemId}/bookmarks`),
+  addBookmark: (itemId: string, body: { timeS: number; title: string }) =>
+    request<{ ok: true }>(`/api/play/${itemId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
+  removeBookmark: (itemId: string, timeS: number) =>
+    request<{ ok: true }>(`/api/play/${itemId}/bookmarks/${Math.round(timeS)}`, { method: "DELETE" }),
 
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
