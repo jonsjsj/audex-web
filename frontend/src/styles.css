@@ -268,6 +268,7 @@ input:focus {
   color: #201400;
 }
 .lib-cover {
+  position: relative;
   width: 100%;
   aspect-ratio: 2 / 3;
   border-radius: 8px;
@@ -285,6 +286,26 @@ input:focus {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.lib-progress-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: color-mix(in oklab, var(--ink) 45%, transparent);
+}
+.lib-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.lib-section-label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 1.2rem 1.5rem 0;
 }
 .lib-title {
   font-size: 0.9rem;

@@ -14,7 +14,7 @@ from app.core.abs_client import AbsError
 router = APIRouter(prefix="/api/library", tags=["library"])
 
 
-def _book_summary(item: dict) -> dict:
+def _book_summary(item: dict, progress: dict | None = None) -> dict:
     media = item.get("media") or {}
     meta = media.get("metadata") or {}
     authors = meta.get("authors") or []
@@ -29,6 +29,12 @@ def _book_summary(item: dict) -> dict:
             series = f"{series} #{seq}"
     elif meta.get("seriesName"):
         series = meta["seriesName"]
+    p = progress or {}
+    # A book with BOTH an audio and ebook progress % (rare — most ABS items are
+    # one format) shows whichever is further along, same idea as the mobile
+    # app's cross-edition "furthest wins": one progress bar per library card,
+    # not two competing ones.
+    pct = max(float(p.get("progress") or 0), float(p.get("ebookProgress") or 0))
     return {
         "id": item["id"],
         "title": meta.get("title") or "(untitled)",
@@ -40,6 +46,9 @@ def _book_summary(item: dict) -> dict:
         "hasEbook": bool(media.get("ebookFile")),
         "numAudioFiles": media.get("numAudioFiles", 0),
         "coverUrl": f"/api/library/items/{item['id']}/cover",
+        "progress": pct,
+        "isFinished": bool(p.get("isFinished")),
+        "lastUpdate": p.get("lastUpdate"),  # epoch ms, or None if never opened — for sorting "Continue"
     }
 
 
@@ -56,6 +65,16 @@ async def get_libraries(token: str = Depends(get_abs_token)):
     ]
 
 
+async def _progress_by_item(token: str) -> dict[str, dict]:
+    """One /api/me call, reused for every book on the page — the same shape
+    already relied on elsewhere (abs_client.me(), get_progress()'s single-item
+    GET). Best-effort: a failed fetch shows the library with no progress
+    badges rather than failing the whole page over a secondary feature."""
+    me = await abs_client.me(token)
+    entries = (me or {}).get("mediaProgress") or []
+    return {e["libraryItemId"]: e for e in entries if e.get("libraryItemId")}
+
+
 @router.get("/items")
 async def get_items(
     library_id: str = Query(..., alias="libraryId"),
@@ -69,7 +88,8 @@ async def get_items(
         page = await abs_client.library_items(token, library_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
-    books = [_book_summary(item) for item in page.get("results", [])]
+    progress = await _progress_by_item(token)
+    books = [_book_summary(item, progress.get(item["id"])) for item in page.get("results", [])]
     if search.strip():
         q = search.strip().lower()
         books = [
@@ -87,7 +107,13 @@ async def get_item(item_id: str, token: str = Depends(get_abs_token)):
     except AbsError as e:
         raise HTTPException(502, str(e))
     media = item.get("media") or {}
-    summary = _book_summary(item)
+    try:
+        progress = await abs_client.get_progress(token, item_id)
+    except AbsError:
+        # Best-effort, same as the library list: the book itself loaded fine,
+        # don't fail the whole page over a progress badge.
+        progress = None
+    summary = _book_summary(item, progress)
     summary["chapters"] = [
         {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
         for c in media.get("chapters", [])

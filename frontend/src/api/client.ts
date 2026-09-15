@@ -44,6 +44,9 @@ export interface Book {
   hasEbook: boolean;
   numAudioFiles: number;
   coverUrl: string;
+  progress: number; // 0..1, furthest of audio/ebook progress
+  isFinished: boolean;
+  lastUpdate: number | null; // epoch ms, null if never opened
 }
 
 export interface BookDetail extends Book {
