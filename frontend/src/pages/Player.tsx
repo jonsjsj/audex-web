@@ -5,6 +5,11 @@ import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 const SKIP_S = 30;
 const SYNC_INTERVAL_MS = 15_000;
 const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
+// Mirrors the mobile app's own PlaybackControllerImpl: a jump of at least
+// this many seconds — a chapter tap, a scrubber drag, several skips in a
+// row — auto-drops a "you were here" bookmark at the position you jumped
+// FROM, so an accidental big seek is always one tap away from undoing.
+const AUTO_BOOKMARK_JUMP_S = 120;
 
 function formatTime(totalS: number): string {
   if (!Number.isFinite(totalS) || totalS < 0) totalS = 0;
@@ -196,6 +201,7 @@ export default function Player() {
     const { index, withinS } = locate(session.tracks, clamped);
     const audio = audioRef.current;
     if (!audio) return;
+    maybeAutoBookmark(positionRef.current, clamped);
     if (index !== trackIndex) {
       const wasPlaying = !audio.paused;
       pendingSeekRef.current = { withinS, thenPlay: wasPlaying };
@@ -268,6 +274,18 @@ export default function Player() {
     setSleepIdx(next);
     const minutes = SLEEP_OPTIONS[next];
     setSleepRemainingS(minutes > 0 ? minutes * 60 : null);
+  }
+
+  /** Fire-and-forget, and deliberately silent on failure — an auto-bookmark
+   *  is a background safety net, not a user-requested action, so it should
+   *  never interrupt playback with an error banner if it doesn't stick. */
+  function maybeAutoBookmark(fromS: number, toS: number) {
+    if (!itemId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
+    const title = `Left off · ${formatTime(fromS)}`;
+    api
+      .addBookmark(itemId, { timeS: fromS, title })
+      .then(() => setBookmarks((prev) => [...prev, { timeS: fromS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))
+      .catch(() => {});
   }
 
   async function addBookmark() {
