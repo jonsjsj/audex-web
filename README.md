@@ -63,3 +63,7 @@ session — sync/close also push to Codex's webhook when linked), `/api/stream`
 (range-request audio proxy), `/api/read/*` (RWPM manifest, per-resource proxy, position
 get/save) today. See the plan (§4) for the full surface as the read-along phase lands:
 `/api/readalong`.
+
+See [`docs/SYNC_API.md`](docs/SYNC_API.md) for how this all actually talks to
+Audiobookshelf, Codex, and the audex-align read-along service — the canonical
+reference, kept identical across the codex, codexaudio, and audex-web repos.
