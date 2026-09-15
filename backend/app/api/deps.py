@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import Identity, WebSession, get_db
+from app.core.security import decrypt_value
 
 
 async def get_current_identity(
@@ -36,3 +37,15 @@ async def get_optional_identity(
         return await get_current_identity(db, session_id)
     except HTTPException:
         return None
+
+
+async def get_abs_token(identity: Identity = Depends(get_current_identity)) -> str:
+    """The signed-in identity's decrypted Audiobookshelf token — every library/
+    play/stream endpoint depends on this rather than re-deriving it, so "not
+    linked to ABS yet" is one 400 in one place instead of a null check per route."""
+    if not identity.abs_token_encrypted:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No Audiobookshelf account connected.")
+    token = decrypt_value(identity.abs_token_encrypted)
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Audiobookshelf connection is invalid — reconnect it.")
+    return token

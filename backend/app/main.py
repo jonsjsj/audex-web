@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth
+from app.api import auth, library, play
 from app.core.config import oidc_active, settings
 from app.core.database import init_db
 
@@ -22,6 +22,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="audex-web", version=settings.APP_VERSION, lifespan=lifespan)
 
 app.include_router(auth.router)
+app.include_router(library.router)
+app.include_router(play.router)
+app.include_router(play.stream_router)
 
 
 @app.get("/api/health")

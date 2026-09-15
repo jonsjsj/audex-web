@@ -3,6 +3,7 @@ data/
 *.db
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 __pycache__/
 *.pyc
 .DS_Store

@@ -4,9 +4,10 @@ Self-hosted, browser version of [Audex](https://github.com/jonsjsj/codexaudio) �
 audio player, ebook reader, and word-sync read-along, syncing with your own
 Audiobookshelf server and (optionally) [Codex](https://github.com/jonsjsj/codex).
 
-This is Phase 0 of the plan: sign-in only (SSO or Audiobookshelf credentials), backend
-API scaffold, and the container/deploy shape everything else builds on. Library, the
-player, the reader, and read-along land in the phases after this one.
+Phases 0-1 of the plan are done: sign-in (SSO or Audiobookshelf credentials), and a
+first real MVP — browse/search your library and listen to an audiobook in the browser
+(streaming, chapters, speed, sleep timer, resume, OS media controls). The ebook reader,
+Codex sync, and read-along land in the phases after this one.
 
 ## Run it
 
@@ -46,7 +47,8 @@ SPA and API behave the same in dev as they do same-origin in the built container
 
 ## API
 
-`/api/health`, `/api/auth/*` today. See the plan (§4) for the full surface as later
-phases land: `/api/library`, `/api/play`, `/api/read`, `/api/readalong`,
-`/api/progress` (which also pushes to Codex's webhook — the same call the Android app
-makes — so a web session shows up on Codex immediately).
+`/api/health`, `/api/auth/*`, `/api/library/*` (libraries, items, item detail, cover
+proxy), `/api/play/*` (start/sync/close an ABS session), `/api/stream` (range-request
+audio proxy) today. See the plan (§4) for the full surface as later phases land:
+`/api/read`, `/api/readalong`, `/api/progress` (which also pushes to Codex's webhook —
+the same call the Android app makes — so a web session shows up on Codex immediately).
