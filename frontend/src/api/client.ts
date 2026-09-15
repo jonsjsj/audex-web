@@ -79,6 +79,33 @@ export interface UserPrefs {
   readerFontSize: number;
 }
 
+export interface ReadAlongStatus {
+  configured: boolean;
+  available: boolean;
+  state: string; // "none" | "queued" | "downloading" | "extracting" | "transcribing" | "aligning" | "done" | "error"
+  progress: number; // 0..1
+  etaSeconds: number | null;
+}
+
+export interface SyncMapEntry {
+  t0: number;
+  t1: number;
+  c0: number;
+  c1: number;
+  p: number; // progression through the whole book, 0..1
+  href: string;
+  text?: string;
+  words?: [number, number][]; // [char-offset-within-sentence, audio-second]
+}
+
+export interface SyncMap {
+  version: number;
+  durationS: number;
+  totalChars: number;
+  chapters: { href: string; c0: number; c1: number }[];
+  entries: SyncMapEntry[];
+}
+
 // A Readium Web Publication Manifest — deliberately untyped (`unknown`) here.
 // It's handed straight to @readium/shared's Manifest.deserialize(), which
 // owns the real shape (https://readium.org/webpub-manifest/); duplicating
@@ -157,6 +184,14 @@ export const api = {
   settings: () => request<UserPrefs>("/api/settings"),
   updateSettings: (body: Partial<UserPrefs>) =>
     request<UserPrefs>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
+
+  readAlongStatus: (itemId: string) => request<ReadAlongStatus>(`/api/readalong/${itemId}/status`),
+  readAlongBuild: (itemId: string, ebookItemId?: string) =>
+    request<{ ok: boolean; state?: string; eta_seconds?: number | null }>(`/api/readalong/${itemId}/build`, {
+      method: "POST",
+      body: JSON.stringify({ ebookItemId: ebookItemId ?? null }),
+    }),
+  readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
 };
 
 export { ApiError };

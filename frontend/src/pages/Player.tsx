@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
+import { useReadAlong } from "../lib/useReadAlong";
+import { progressionAt } from "../lib/syncMap";
 
 const SKIP_S = 30;
 const SYNC_INTERVAL_MS = 15_000;
@@ -41,6 +43,7 @@ function closeBeacon(itemId: string, body: object) {
 export default function Player() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -56,6 +59,10 @@ export default function Player() {
   const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [addingBookmark, setAddingBookmark] = useState(false);
+
+  // Cross-format jump (docs/SYNC_API.md §3) — only worth polling/building for
+  // a book that could ever have both an audio and an ebook edition.
+  const readAlong = useReadAlong(itemId, book?.hasEbook ?? false);
 
   // Mutable session bookkeeping that effects need without re-subscribing.
   const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0 });
@@ -91,10 +98,25 @@ export default function Player() {
         if (prefs) setSpeed(prefs.playbackSpeed);
         stateRef.current.sessionId = s.sessionId;
         stateRef.current.durationS = s.durationS;
-        const { index, withinS } = locate(s.tracks, s.currentTimeS);
+        // A read-along "jump to audio" link (Reader.tsx) arrives as
+        // ?atTime=<seconds> — it overrides the ABS-resumed position for this
+        // one load, same as the mobile app's deep-link resume override.
+        const atTimeParam = searchParams.get("atTime");
+        const atTimeS = atTimeParam !== null ? Number(atTimeParam) : null;
+        const resumeS = atTimeS !== null && Number.isFinite(atTimeS) ? atTimeS : s.currentTimeS;
+        const { index, withinS } = locate(s.tracks, resumeS);
         setTrackIndex(index);
-        setPositionS(s.currentTimeS);
-        stateRef.current.lastSyncPos = s.currentTimeS;
+        setPositionS(resumeS);
+        stateRef.current.lastSyncPos = resumeS;
+        if (atTimeS !== null) {
+          // Consume the param so a refresh resumes normally instead of
+          // re-jumping back to this same spot every time.
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("atTime");
+            return next;
+          }, { replace: true });
+        }
         // NOT here: the <audio> element doesn't exist yet — this component
         // returns an early "Loading…" placeholder (no <audio> in the tree)
         // until `session` is set, and that only takes effect on React's NEXT
@@ -261,6 +283,15 @@ export default function Player() {
     if (pending.thenPlay) audio.play().catch(() => {});
   }
 
+  /** Navigate to the reader at the point in the text the audio has reached —
+   *  the audio-side half of the cross-format jump (docs/SYNC_API.md §3). */
+  function jumpToText() {
+    if (!itemId || !readAlong.map) return;
+    const p = progressionAt(readAlong.map, positionRef.current);
+    if (p === null) return;
+    navigate(`/read/${itemId}?atProgression=${p}`);
+  }
+
   function cycleSpeed() {
     const speeds = [0.75, 1, 1.25, 1.5, 2];
     const next = speeds[(speeds.indexOf(speed) + 1) % speeds.length];
@@ -425,6 +456,30 @@ export default function Player() {
           <span className="l">BOOKMARK</span>
         </button>
       </div>
+
+      {book.hasEbook && (
+        <div className="player-readalong">
+          {readAlong.map ? (
+            <button className="player-readalong-jump" onClick={jumpToText}>
+              Jump to text ↦
+            </button>
+          ) : readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+            <div className="player-readalong-status">
+              <span>Building word sync…</span>
+              {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
+            </div>
+          ) : (
+            <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
+              Build read-along
+            </button>
+          )}
+          {readAlong.error && (
+            <p className="error" style={{ margin: 0 }}>
+              {readAlong.error}
+            </p>
+          )}
+        </div>
+      )}
 
       {bookmarks.length > 0 && (
         <div className="player-chapters">

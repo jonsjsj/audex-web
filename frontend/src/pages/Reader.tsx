@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { HttpFetcher, Locator, Manifest, Publication } from "@readium/shared";
 import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
 import { api } from "../api/client";
+import { useReadAlong } from "../lib/useReadAlong";
+import { timeAtProgression } from "../lib/syncMap";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -16,6 +18,7 @@ const SAVE_DEBOUNCE_MS = 2000;
 export default function Reader() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const containerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<EpubNavigator | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -26,6 +29,14 @@ export default function Reader() {
   const [fontSizeIdx, setFontSizeIdx] = useState(1); // index into FONT_SIZES, 100% default
   const [progressPct, setProgressPct] = useState<number | null>(null);
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
+  const [hasAudio, setHasAudio] = useState(false);
+  // Mirrors progressPct as a raw 0..1 fraction — progressPct is rounded for
+  // display, too coarse to feed back into progressionAt/timeAtProgression.
+  const progressionRef = useRef(0);
+
+  // Cross-format jump (docs/SYNC_API.md §3) — gated on this item also having
+  // audio, same reasoning as Player.tsx's own gate on hasEbook.
+  const readAlong = useReadAlong(itemId, hasAudio);
 
   useEffect(() => {
     if (!itemId || !containerRef.current) return;
@@ -34,12 +45,14 @@ export default function Reader() {
 
     async function open() {
       try {
-        const [manifestJson, positionRes, prefs] = await Promise.all([
+        const [manifestJson, positionRes, prefs, detail] = await Promise.all([
           api.readManifest(itemId!),
           api.readPosition(itemId!),
           api.settings().catch(() => null),
+          api.item(itemId!).catch(() => null),
         ]);
         if (cancelled) return;
+        if (detail) setHasAudio(detail.numAudioFiles > 0);
 
         // A LOCAL var, not the fontSizeIdx STATE — this effect only runs once
         // per itemId (mount), so the closure below would otherwise always
@@ -62,14 +75,41 @@ export default function Reader() {
         setTitle(pub.metadata.title.getTranslation());
 
         const positions = await pub.positionsFromManifest();
-        const initialLocator = positionRes.locator
-          ? Locator.deserialize(positionRes.locator)
-          : undefined;
+
+        // A read-along "jump to text" link (Player.tsx) arrives as
+        // ?atProgression=<0..1> — it overrides the saved position for this
+        // one load. There's no direct "Locator from progression" constructor,
+        // so pick the nearest entry from Readium's own fixed-size position
+        // list (the same list EpubNavigator uses internally for percent-based
+        // navigation).
+        const atProgressionParam = searchParams.get("atProgression");
+        const atProgression = atProgressionParam !== null ? Number(atProgressionParam) : null;
+        let initialLocator: Locator | undefined;
+        if (atProgression !== null && Number.isFinite(atProgression) && positions.length > 0) {
+          initialLocator = positions.reduce((best, loc) => {
+            const bestP = best.locations.totalProgression ?? 0;
+            const locP = loc.locations.totalProgression ?? 0;
+            return Math.abs(locP - atProgression) < Math.abs(bestP - atProgression) ? loc : best;
+          });
+          // Consume the param so a refresh resumes from the real saved
+          // position instead of re-jumping back here every time.
+          setSearchParams(
+            (prev) => {
+              const next = new URLSearchParams(prev);
+              next.delete("atProgression");
+              return next;
+            },
+            { replace: true },
+          );
+        } else {
+          initialLocator = positionRes.locator ? Locator.deserialize(positionRes.locator) : undefined;
+        }
 
         const listeners: EpubNavigatorListeners = {
           frameLoaded: () => {},
           positionChanged: (locator) => {
             const loc = nav?.currentLocator ?? locator;
+            progressionRef.current = loc.locations.totalProgression ?? 0;
             setProgressPct(
               loc.locations.totalProgression != null ? Math.round(loc.locations.totalProgression * 100) : null,
             );
@@ -163,6 +203,15 @@ export default function Reader() {
     api.updateSettings({ readerFontSize: FONT_SIZES[idx] }).catch(() => {});
   }
 
+  /** Navigate to the player at the point the text has reached — the reader-
+   *  side half of the cross-format jump (docs/SYNC_API.md §3). */
+  function jumpToAudio() {
+    if (!itemId || !readAlong.map) return;
+    const t = timeAtProgression(readAlong.map, progressionRef.current);
+    if (t === null) return;
+    navigate(`/play/${itemId}?atTime=${t}`);
+  }
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowRight" || e.key === "PageDown") nextPage();
     else if (e.key === "ArrowLeft" || e.key === "PageUp") prevPage();
@@ -239,6 +288,23 @@ export default function Reader() {
             <div className="reader-progress-fill" style={{ width: `${progressPct}%` }} />
           </div>
           <span className="reader-progress-pct">{progressPct}%</span>
+        </div>
+      )}
+
+      {hasAudio && (
+        <div className="reader-readalong">
+          {readAlong.map ? (
+            <button className="reader-readalong-jump" onClick={jumpToAudio}>
+              Jump to audio ↦
+            </button>
+          ) : readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+            <span className="reader-readalong-status">Building word sync…</span>
+          ) : (
+            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
+              Build read-along
+            </button>
+          )}
+          {readAlong.error && <span className="reader-readalong-status">{readAlong.error}</span>}
         </div>
       )}
     </div>

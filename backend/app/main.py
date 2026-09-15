@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, library, play, read
+from app.api import auth, library, play, read, readalong
 # Aliased: app.api.settings (this router) vs app.core.config.settings (the
 # Settings instance imported right below) would otherwise collide on the
 # same name in this module's namespace.
@@ -30,6 +30,7 @@ app.include_router(library.router)
 app.include_router(play.router)
 app.include_router(play.stream_router)
 app.include_router(read.router)
+app.include_router(readalong.router)
 app.include_router(settings_api.router)
 
 

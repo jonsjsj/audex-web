@@ -474,6 +474,41 @@ input:focus {
   color: var(--muted);
 }
 
+.player-readalong {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.9rem 0;
+}
+.player-readalong-jump,
+.player-readalong-build {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.45rem 1.1rem;
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+.player-readalong-jump:hover,
+.player-readalong-build:hover {
+  background: var(--surface-2);
+}
+.player-readalong-status {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.player-readalong-status .t {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
 .player-chapters {
   margin-top: 1.6rem;
 }
@@ -675,6 +710,35 @@ input:focus {
   font-size: 0.7rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.reader-readalong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem 0.7rem;
+  flex: none;
+}
+.reader-readalong-jump,
+.reader-readalong-build {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  font-family: var(--sans);
+  font-size: 0.76rem;
+  color: var(--accent);
+  cursor: pointer;
+}
+.reader-readalong-jump:hover,
+.reader-readalong-build:hover {
+  background: var(--surface-2);
+}
+.reader-readalong-status {
+  font-family: var(--sans);
+  font-size: 0.76rem;
+  color: var(--muted);
 }
 
 /* ── Settings ─────────────────────────────────────────────────────────── */
