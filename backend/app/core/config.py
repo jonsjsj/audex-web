@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:////data/audexweb.db"
     DATA_DIR: str = "/data"
 
+    # ── Self-update (Settings → Update now) — see api/admin.py. Only works
+    # when the host bind-mounts its own Docker socket in (docker-compose.yml
+    # documents this); harmless/unused otherwise. This app is a single-user
+    # homelab tool with no separate admin role, so any signed-in person can
+    # trigger it — same trust model as everything else here.
+    DOCKER_SOCK: str = "/var/run/docker.sock"
+    UPDATE_IMAGE: str = "ghcr.io/jonsjsj/audex-web:latest"
+    UPDATE_CONTAINER_NAME: str = "audex-web"
+
 
 settings = Settings()
 

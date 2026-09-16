@@ -213,6 +213,9 @@ export const api = {
       body: JSON.stringify({ ebookItemId: ebookItemId ?? null }),
     }),
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
+
+  updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
+  triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
 };
 
 export { ApiError };

@@ -8,6 +8,13 @@ services:
       - "${AUDEX_WEB_PORT:-8420}:8000"
     volumes:
       - ${AUDEX_WEB_DATA_PATH:-./data}:/data
+      # Lets Settings → "Update now" pull the latest ghcr.io image and
+      # recreate this container itself (see backend/app/api/admin.py) — a
+      # container-recreating capability is root-equivalent host access, so
+      # only mount this if you're comfortable with that (fine for a
+      # single-user homelab box; skip it otherwise — the button just 400s
+      # cleanly without this bind).
+      - ${AUDEX_WEB_DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
     environment:
       - ABS_URL=${ABS_URL:-}
       - CODEX_URL=${CODEX_URL:-}
@@ -20,6 +27,8 @@ services:
       - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
       - OIDC_INTERNAL_BASE=${OIDC_INTERNAL_BASE:-}
       - DATABASE_URL=sqlite+aiosqlite:////data/audexweb.db
+      - UPDATE_IMAGE=${UPDATE_IMAGE:-ghcr.io/jonsjsj/audex-web:latest}
+      - UPDATE_CONTAINER_NAME=${UPDATE_CONTAINER_NAME:-audex-web}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status == 200 else 1)"]
       interval: 30s

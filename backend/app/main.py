@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, library, play, read, readalong
+from app.api import admin, auth, library, play, read, readalong
 # Aliased: app.api.settings (this router) vs app.core.config.settings (the
 # Settings instance imported right below) would otherwise collide on the
 # same name in this module's namespace.
@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="audex-web", version=settings.APP_VERSION, lifespan=lifespan)
 
+app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(library.router)
 app.include_router(play.router)

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, Me } from "../api/client";
 
@@ -7,6 +7,31 @@ export default function Settings({ me, onChanged, onSignedOut }: { me: Me; onCha
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.health().then((h) => setVersion(h.version)).catch(() => {});
+    api.updateAvailable().then((r) => setUpdateAvailable(r.available)).catch(() => {});
+  }, []);
+
+  // Rebuilds itself from the freshly-pulled GHCR image (see
+  // backend/app/api/admin.py) — this page WILL go offline for a few seconds
+  // partway through, that's expected, not a failure.
+  async function triggerUpdate() {
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      const res = await api.triggerUpdate();
+      setUpdateMessage(res.message);
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message : "Couldn't start the update.");
+      setUpdating(false);
+    }
+  }
 
   async function linkCodex() {
     if (!codexToken.trim()) return;
@@ -102,6 +127,25 @@ export default function Settings({ me, onChanged, onSignedOut }: { me: Me; onCha
           </div>
         )}
         {codexError && <div className="error" style={{ marginTop: "0.6rem" }}>{codexError}</div>}
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">About</h2>
+        <div className="settings-row">
+          <div>
+            <div className="settings-row-label">audex-web</div>
+            <div className="settings-row-sub">{version ? `v${version}` : "…"}</div>
+          </div>
+          {updateAvailable ? (
+            <button className="btn btn-secondary" style={{ width: "auto" }} onClick={triggerUpdate} disabled={updating}>
+              {updating ? "Updating…" : "Update now"}
+            </button>
+          ) : (
+            <span className="settings-row-sub">Self-update not set up on this deploy</span>
+          )}
+        </div>
+        {updateMessage && <p className="settings-help">{updateMessage}</p>}
+        {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
       </section>
     </div>
   );
