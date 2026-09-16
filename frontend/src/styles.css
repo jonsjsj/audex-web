@@ -437,10 +437,31 @@ input:focus {
 .group-back:hover {
   color: var(--accent);
 }
+.group-view-toggle {
+  display: flex;
+  gap: 0.2rem;
+  flex: none;
+}
+.group-view-toggle button {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.group-view-toggle button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .group-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: 1.4rem;
+  gap: 1.6rem;
   padding: 1.6rem 1.5rem;
 }
 .group-tile {
@@ -456,29 +477,35 @@ input:focus {
   text-align: left;
   cursor: pointer;
 }
-.group-tile-stack {
-  position: relative;
+/* A single poster image — no cover-stack overlay, so nothing ever sits on
+   top of the name below it (that overlap was the bug). */
+.group-tile-poster {
   width: 100%;
   aspect-ratio: 2 / 3;
-  margin-bottom: 0.3rem;
-}
-.group-tile-stack img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  margin-bottom: 0.5rem;
   border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-2);
   box-shadow: var(--shadow);
   border: 1px solid var(--line);
 }
-.group-tile-stack img:nth-child(2) {
-  transform: translate(6%, 5%) scale(0.96);
-  filter: brightness(0.93);
+.group-tile-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
-.group-tile-stack img:nth-child(3) {
-  transform: translate(12%, 10%) scale(0.92);
-  filter: brightness(0.86);
+.group-tile-initials {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-size: 2.2rem;
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .group-tile-name {
   font-size: 0.92rem;
@@ -488,6 +515,54 @@ input:focus {
 .group-tile-count {
   font-family: var(--mono);
   font-size: 0.72rem;
+  color: var(--muted);
+}
+
+/* ── List view (flat hairline rows — mirrors the mobile app's own list) ── */
+.group-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4rem 1.5rem 1.6rem;
+}
+.group-list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  padding: 0.65rem 0.1rem;
+  font-family: var(--sans);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.group-list-thumb {
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.group-list-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.group-list-thumb .group-tile-initials {
+  font-size: 0.9rem;
+}
+.group-list-name {
+  flex: 1;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.group-list-count {
+  font-family: var(--mono);
+  font-size: 0.76rem;
   color: var(--muted);
 }
 
@@ -613,61 +688,89 @@ input:focus {
 }
 
 /* ── Player ───────────────────────────────────────────────────────────── */
+/* Mirrors the native Audex app's own player screen: a full-bleed cover hero
+   with a scrim the title sits on, a scrubber + decorative waveform, a big
+   single filled transport button (the one "bubble" — everything else here
+   is flat: hairline dividers, 2px radii, no card shadows), a 4-cell utility
+   strip, and an underline-tab Chapters/Bookmarks list below. */
 .player-wrap {
   max-width: 30rem;
   margin: 0 auto;
-  padding: 1.2rem 1.5rem 3rem;
+  padding: 0 1.5rem 3rem;
 }
-.player-back {
-  background: none;
-  border: none;
-  color: var(--ink-soft);
-  font-family: var(--sans);
-  font-size: 0.85rem;
-  padding: 0.4rem 0;
-  cursor: pointer;
-}
-.player-cover {
-  width: 60%;
-  margin: 1.2rem auto 1.4rem;
-  aspect-ratio: 1 / 1;
-  border-radius: 12px;
+
+.player-hero {
+  position: relative;
+  margin: 0 -1.5rem;
+  aspect-ratio: 0.92;
   overflow: hidden;
-  box-shadow: var(--shadow);
   background: var(--surface-2);
 }
-.player-cover img {
+.player-hero-cover {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
+.player-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in oklab, var(--paper) 35%, transparent) 45%,
+    color-mix(in oklab, var(--paper) 90%, transparent) 78%,
+    var(--paper) 100%
+  );
+}
+.player-hero-eyebrow {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+  color: var(--surface);
+  backdrop-filter: blur(2px);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+}
+.player-hero-text {
+  position: absolute;
+  left: 1.5rem;
+  right: 1.5rem;
+  bottom: 1rem;
+}
 .player-title {
-  font-family: var(--serif);
-  font-weight: 680;
+  font-family: "Space Grotesk", var(--sans);
+  font-weight: 700;
   font-size: 1.5rem;
-  text-align: center;
+  line-height: 1.15;
   margin: 0 0 0.2rem;
   text-wrap: balance;
 }
 .player-author {
-  text-align: center;
   color: var(--ink-soft);
   font-size: 0.92rem;
   margin: 0;
 }
-.player-chapter {
+
+.player-progress-section {
+  margin-top: 1.1rem;
+}
+.player-current-chapter {
+  min-height: 1.2em;
   text-align: center;
   color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  letter-spacing: 0.02em;
-  margin: 0.9rem 0 0;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.7rem;
 }
 
-.player-scrub {
-  margin-top: 1.4rem;
-}
 .player-scrub-track {
   position: relative;
 }
@@ -692,13 +795,50 @@ input:focus {
   opacity: 0.8;
   border-radius: 1px;
 }
+.player-scrub-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.player-scrub-mark {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+  background: var(--accent);
+  border: 1.5px solid var(--paper);
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.player-waveform {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 1.8rem;
+  margin: 0.6rem 0 0.3rem;
+}
+.player-wave-bar {
+  flex: 1;
+  background: var(--line);
+  border-radius: 2px;
+  min-height: 3px;
+}
+.player-wave-bar.lit {
+  background: var(--accent);
+}
+
 .player-times {
   display: flex;
   justify-content: space-between;
   font-family: var(--mono);
   font-size: 0.76rem;
   color: var(--muted);
-  margin-top: 0.2rem;
+  margin-top: 0.3rem;
   font-variant-numeric: tabular-nums;
 }
 
@@ -710,23 +850,33 @@ input:focus {
   margin: 1.5rem 0;
 }
 .player-play {
-  width: 4.2rem;
-  height: 4.2rem;
+  width: 4.5rem;
+  height: 4.5rem;
   border-radius: 999px;
   border: none;
   background: var(--accent);
   color: #201400;
-  font-size: 1.3rem;
+  font-size: 1.35rem;
   cursor: pointer;
+  box-shadow: var(--shadow);
 }
 .player-skip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
   background: none;
   border: none;
   color: var(--ink);
-  font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: 1.3rem;
   cursor: pointer;
   padding: 0.5rem;
+  border-radius: 999px;
+}
+.player-skip-n {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--muted);
 }
 
 .player-utility {
@@ -746,6 +896,7 @@ input:focus {
   padding: 0.8rem 0.4rem;
   cursor: pointer;
   color: var(--ink);
+  border-radius: 0; /* flat — no per-cell rounding, matches the native app's controls */
 }
 .player-util-cell:last-child {
   border-right: none;
@@ -754,6 +905,9 @@ input:focus {
   font-weight: 600;
   font-size: 0.95rem;
   font-variant-numeric: tabular-nums;
+}
+.player-util-cell .v.accent {
+  color: var(--accent);
 }
 .player-util-cell .l {
   font-family: var(--mono);
@@ -767,7 +921,7 @@ input:focus {
   font-family: var(--sans);
   font-size: 0.78rem;
   color: var(--accent);
-  margin: -0.4rem 0 0.6rem;
+  margin: 0.6rem 0 0;
 }
 
 .player-readalong {
@@ -805,18 +959,36 @@ input:focus {
   font-size: 0.72rem;
 }
 
-.player-chapters {
-  margin-top: 1.6rem;
+.player-tabs {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1.4rem;
+  border-bottom: 1px solid var(--line);
 }
-.player-chapters > .l {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.1em;
+.player-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
   color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  padding: 0 0 0.6rem;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.player-tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.player-tab-list {
+  margin-top: 0.2rem;
 }
 .player-chapter-row {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
   width: 100%;
   background: none;
   border: none;
@@ -828,11 +1000,26 @@ input:focus {
   cursor: pointer;
   text-align: left;
 }
-.player-chapter-row.active {
+.player-chapter-idx {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.player-chapter-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.player-chapter-row.active .player-chapter-idx,
+.player-chapter-row.active .player-chapter-title {
   color: var(--accent);
   font-weight: 600;
 }
 .player-chapter-row .t {
+  flex: none;
   font-family: var(--mono);
   font-size: 0.76rem;
   color: var(--muted);
@@ -859,15 +1046,67 @@ input:focus {
 .player-bookmark-remove {
   flex: none;
   background: none;
-  border: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--muted);
-  font-size: 1.1rem;
+  font-family: var(--sans);
+  font-size: 0.7rem;
   line-height: 1;
-  padding: 0.2rem 0.3rem;
+  padding: 0.3rem 0.6rem;
   cursor: pointer;
 }
-.player-bookmark-remove:hover {
+.player-bookmark-remove.confirm {
   color: var(--danger);
+  border-color: color-mix(in oklab, var(--danger) 40%, var(--line));
+}
+
+/* ── Player dialogs (Go To / Add bookmark) ───────────────────────────── */
+.player-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in oklab, var(--ink) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.player-dialog {
+  width: 100%;
+  max-width: 22rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 1.4rem;
+}
+.player-dialog h3 {
+  margin: 0 0 0.9rem;
+  font-family: var(--serif);
+  font-size: 1.1rem;
+}
+.player-dialog-reading-jump {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--accent-soft);
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.player-dialog .divider {
+  margin: 0.9rem 0;
+}
+.player-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
 }
 .player-discard {
   display: block;
