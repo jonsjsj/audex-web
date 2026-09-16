@@ -50,10 +50,24 @@ export interface Book {
   audioProgress: number; // 0..1, raw ABS audio progress (currentTime/duration)
   ebookProgress: number; // 0..1, raw ABS ebook progress
   audioTimeS: number; // raw ABS audio position, for mapping into ebook progression
+  addedAt: number | null; // epoch ms — for "date added" sort
 }
 
 export interface BookDetail extends Book {
   chapters: Chapter[];
+  description: string | null;
+  narrator: string | null;
+  publisher: string | null;
+  publishedYear: string | null;
+  genres: string[];
+  language: string | null;
+  isbn: string | null;
+  asin: string | null;
+}
+
+export interface BookGroup {
+  name: string;
+  books: Book[];
 }
 
 export interface PlayTrack {
@@ -162,6 +176,10 @@ export const api = {
       `/api/library/items?libraryId=${encodeURIComponent(libraryId)}&search=${encodeURIComponent(search)}`,
     ),
   item: (itemId: string) => request<BookDetail>(`/api/library/items/${itemId}`),
+  series: (libraryId: string) =>
+    request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
+  authors: (libraryId: string) =>
+    request<BookGroup[]>(`/api/library/authors?libraryId=${encodeURIComponent(libraryId)}`),
 
   play: (itemId: string) => request<PlaySession>(`/api/play/${itemId}`, { method: "POST" }),
   sync: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>

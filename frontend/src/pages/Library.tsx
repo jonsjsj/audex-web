@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Book, Library as LibraryModel } from "../api/client";
+import { api, Book } from "../api/client";
+import { useShell } from "../components/Shell";
 
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
@@ -21,24 +22,63 @@ function isContinuable(b: Book): boolean {
 
 const CONTINUE_LIMIT = 6;
 
+type SortKey = "title" | "author" | "added" | "duration" | "progress";
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "title", label: "Title" },
+  { key: "author", label: "Author" },
+  { key: "added", label: "Recently added" },
+  { key: "duration", label: "Duration" },
+  { key: "progress", label: "Progress" },
+];
+
+// Mirrors the mobile app's WorkFilter (LibraryViewModel.kt) exactly.
+type FilterKey = "all" | "audio" | "ebook" | "progress";
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "all", label: "All formats" },
+  { key: "audio", label: "Audiobook" },
+  { key: "ebook", label: "Ebook" },
+  { key: "progress", label: "In progress" },
+];
+
+function filterBooks(books: Book[], key: FilterKey): Book[] {
+  switch (key) {
+    case "audio":
+      return books.filter((b) => b.numAudioFiles > 0);
+    case "ebook":
+      return books.filter((b) => b.hasEbook);
+    case "progress":
+      return books.filter(isContinuable);
+    case "all":
+    default:
+      return books;
+  }
+}
+
+function sortBooks(books: Book[], key: SortKey): Book[] {
+  const arr = [...books];
+  switch (key) {
+    case "author":
+      return arr.sort((a, b) => (a.author ?? "").localeCompare(b.author ?? "") || a.title.localeCompare(b.title));
+    case "added":
+      return arr.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
+    case "duration":
+      return arr.sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0));
+    case "progress":
+      return arr.sort((a, b) => b.progress - a.progress);
+    case "title":
+    default:
+      return arr.sort((a, b) => a.title.localeCompare(b.title));
+  }
+}
+
 export default function Library() {
   const navigate = useNavigate();
-  const [libraries, setLibraries] = useState<LibraryModel[] | null>(null);
-  const [libraryId, setLibraryId] = useState<string | null>(null);
+  const { libraryId } = useShell();
   const [books, setBooks] = useState<Book[] | null>(null);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("title");
+  const [filter, setFilter] = useState<FilterKey>("all");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .libraries()
-      .then((libs) => {
-        setLibraries(libs);
-        if (libs.length > 0) setLibraryId(libs[0].id);
-        else setError("No book libraries found on this Audiobookshelf server.");
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load your libraries."));
-  }, []);
 
   useEffect(() => {
     if (!libraryId) return;
@@ -60,36 +100,34 @@ export default function Library() {
       .slice(0, CONTINUE_LIMIT);
   }, [books, search]);
 
+  const sortedBooks = useMemo(
+    () => (books ? sortBooks(filterBooks(books, filter), sort) : null),
+    [books, sort, filter],
+  );
+
   return (
     <div className="lib">
       <header className="lib-head">
-        <h1 className="brand lib-brand">
-          Aud<em>ex</em>
-        </h1>
-        <div className="lib-head-right">
-          {libraries && libraries.length > 1 && (
-            <select
-              className="lib-select"
-              value={libraryId ?? ""}
-              onChange={(e) => setLibraryId(e.target.value)}
-            >
-              {libraries.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          )}
-          <input
-            className="lib-search"
-            placeholder="Search your library…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <button className="btn btn-secondary lib-signout" onClick={() => navigate("/settings")}>
-            Settings
-          </button>
-        </div>
+        <input
+          className="lib-search"
+          placeholder="Search your library…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select className="lib-sort" value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} aria-label="Filter">
+          {FILTERS.map((f) => (
+            <option key={f.key} value={f.key}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+        <select className="lib-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort by">
+          {SORTS.map((s) => (
+            <option key={s.key} value={s.key}>
+              Sort: {s.label}
+            </option>
+          ))}
+        </select>
       </header>
 
       {error && <div className="error" style={{ margin: "1rem 1.5rem" }}>{error}</div>}
@@ -101,23 +139,26 @@ export default function Library() {
           {search ? `Nothing matches "${search}".` : "This library is empty."}
         </p>
       )}
+      {books && books.length > 0 && sortedBooks?.length === 0 && (
+        <p className="sub" style={{ padding: "0 1.5rem" }}>Nothing matches this filter.</p>
+      )}
 
       {continueBooks.length > 0 && (
         <section>
           <div className="lib-section-label">Continue</div>
           <div className="lib-grid">
             {continueBooks.map((b) => (
-              <BookCard key={`continue-${b.id}`} book={b} onNavigate={navigate} />
+              <BookCard key={`continue-${b.id}`} book={b} onNavigate={navigate} quickResume />
             ))}
           </div>
         </section>
       )}
 
-      {books && books.length > 0 && (
+      {sortedBooks && sortedBooks.length > 0 && (
         <section>
           {continueBooks.length > 0 && <div className="lib-section-label">All books</div>}
           <div className="lib-grid">
-            {books.map((b) => (
+            {sortedBooks.map((b) => (
               <BookCard key={b.id} book={b} onNavigate={navigate} />
             ))}
           </div>
@@ -127,13 +168,13 @@ export default function Library() {
   );
 }
 
-function BookCard({ book: b, onNavigate }: { book: Book; onNavigate: (href: string) => void }) {
+/** [quickResume]: Continue-rail cards jump straight into Play/Read (you
+ *  tapped it to keep going); ordinary library-grid cards open the book info
+ *  page instead, same as Codex's own browse cards — a media app you're
+ *  scanning wants details first, one you're actively mid-book wants speed. */
+export function BookCard({ book: b, onNavigate, quickResume }: { book: Book; onNavigate: (href: string) => void; quickResume?: boolean }) {
   const hasAudio = b.numAudioFiles > 0;
-  // A book with only one format opens directly; one with both opens Listen by
-  // default (audio is the more common "resume where I was" action for a
-  // library synced from an audiobook-first server) with an explicit Read
-  // affordance alongside it, rather than guessing.
-  const primaryHref = hasAudio ? `/play/${b.id}` : `/read/${b.id}`;
+  const primaryHref = quickResume ? (hasAudio ? `/play/${b.id}` : `/read/${b.id}`) : `/book/${b.id}`;
   const showProgress = b.progress > 0.001 && !b.isFinished;
   return (
     <div className="lib-card-wrap">
@@ -155,7 +196,7 @@ function BookCard({ book: b, onNavigate }: { book: Book; onNavigate: (href: stri
         {b.series && <div className="lib-series">{b.series}</div>}
         {formatDuration(b.durationS) && <div className="lib-duration">{formatDuration(b.durationS)}</div>}
       </button>
-      {hasAudio && b.hasEbook && (
+      {quickResume && hasAudio && b.hasEbook && (
         <button className="lib-read-badge" aria-label={`Read ${b.title}`} onClick={() => onNavigate(`/read/${b.id}`)}>
           Read
         </button>

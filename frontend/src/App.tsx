@@ -1,10 +1,16 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { api, Me } from "./api/client";
+import Shell from "./components/Shell";
+import AuthorDetail from "./pages/AuthorDetail";
+import Authors from "./pages/Authors";
+import BookDetail from "./pages/BookDetail";
 import LinkAbs from "./pages/LinkAbs";
 import Library from "./pages/Library";
 import Login from "./pages/Login";
 import Player from "./pages/Player";
+import Series from "./pages/Series";
+import SeriesDetail from "./pages/SeriesDetail";
 import Settings from "./pages/Settings";
 
 // @readium/navigator + @readium/shared pull in ~330kB of code (ReadiumCSS
@@ -75,10 +81,17 @@ export default function App() {
           ) : !me.absLinked ? (
             <Navigate to="/link-abs" replace />
           ) : (
-            <Library />
+            <Shell />
           )
         }
-      />
+      >
+        <Route index element={<Library />} />
+        <Route path="series" element={<Series />} />
+        <Route path="series/:name" element={<SeriesDetail />} />
+        <Route path="authors" element={<Authors />} />
+        <Route path="authors/:name" element={<AuthorDetail />} />
+        <Route path="book/:itemId" element={<BookDetail />} />
+      </Route>
     </Routes>
   );
 }

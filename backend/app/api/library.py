@@ -56,7 +56,52 @@ def _book_summary(item: dict, progress: dict | None = None) -> dict:
         "audioProgress": float(p.get("progress") or 0),
         "ebookProgress": float(p.get("ebookProgress") or 0),
         "audioTimeS": float(p.get("currentTime") or 0),
+        "addedAt": item.get("addedAt"),  # epoch ms — for "date added" sort
     }
+
+
+def _book_detail_extra(item: dict) -> dict:
+    """The metadata fields worth a whole detail page but not a library card —
+    kept out of _book_summary (used by the list AND detail endpoints) so
+    browsing a library of hundreds of books doesn't ship every description."""
+    meta = (item.get("media") or {}).get("metadata") or {}
+    narrators = meta.get("narrators") or []
+    return {
+        "description": meta.get("description"),
+        "narrator": ", ".join(narrators) if narrators else None,
+        "publisher": meta.get("publisher"),
+        "publishedYear": meta.get("publishedYear"),
+        "genres": meta.get("genres") or [],
+        "language": meta.get("language"),
+        "isbn": meta.get("isbn"),
+        "asin": meta.get("asin"),
+    }
+
+
+def _series_entries(item: dict) -> list[tuple[str, float | None]]:
+    """All (seriesName, sequence) pairs on an item — almost always one, ABS
+    allows more than one series membership so this doesn't assume just one."""
+    meta = (item.get("media") or {}).get("metadata") or {}
+    out: list[tuple[str, float | None]] = []
+    for s in meta.get("series") or []:
+        name = s.get("name")
+        if not name:
+            continue
+        seq = s.get("sequence")
+        try:
+            seq_f = float(seq) if seq not in (None, "") else None
+        except (TypeError, ValueError):
+            seq_f = None
+        out.append((name, seq_f))
+    return out
+
+
+def _author_names(item: dict) -> list[str]:
+    meta = (item.get("media") or {}).get("metadata") or {}
+    names = [a["name"] for a in (meta.get("authors") or []) if a.get("name")]
+    if not names and meta.get("authorName"):
+        names = [meta["authorName"]]
+    return names
 
 
 @router.get("/libraries")
@@ -125,7 +170,60 @@ async def get_item(item_id: str, token: str = Depends(get_abs_token)):
         {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
         for c in media.get("chapters", [])
     ]
+    summary.update(_book_detail_extra(item))
     return summary
+
+
+@router.get("/series")
+async def get_series(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+    """Series grouped from this library's own items (not a Hardcover-style
+    fill-in of volumes you don't own — Codex does that; this just organizes
+    what's actually in your ABS library). Books embedded directly rather than
+    a separate per-series fetch: a homelab-scale library's whole item list
+    already fits in one call (see library_items()'s own docstring)."""
+    try:
+        page = await abs_client.library_items(token, library_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    progress = await _progress_by_item(token)
+    groups: dict[str, list[tuple[float | None, dict]]] = {}
+    for item in page.get("results", []):
+        entries = _series_entries(item)
+        if not entries:
+            continue
+        book = _book_summary(item, progress.get(item["id"]))
+        for name, seq in entries:
+            groups.setdefault(name, []).append((seq, book))
+    result = []
+    for name, entries in groups.items():
+        entries.sort(key=lambda e: (e[0] is None, e[0]))
+        result.append({"name": name, "books": [b for _, b in entries]})
+    result.sort(key=lambda g: g["name"].lower())
+    return result
+
+
+@router.get("/authors")
+async def get_authors(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+    """Same idea as /series, grouped by author instead."""
+    try:
+        page = await abs_client.library_items(token, library_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    progress = await _progress_by_item(token)
+    groups: dict[str, list[dict]] = {}
+    for item in page.get("results", []):
+        names = _author_names(item)
+        if not names:
+            continue
+        book = _book_summary(item, progress.get(item["id"]))
+        for name in names:
+            groups.setdefault(name, []).append(book)
+    result = [
+        {"name": name, "books": sorted(books, key=lambda b: b["title"].lower())}
+        for name, books in groups.items()
+    ]
+    result.sort(key=lambda g: g["name"].lower())
+    return result
 
 
 @router.get("/items/{item_id}/cover")
