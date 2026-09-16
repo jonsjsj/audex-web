@@ -7,6 +7,33 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.3.0] - 2026-09-16
+
+### Added
+- **Narrators** — a third browsing section alongside Series/Authors ("like
+  the author": grid/list toggle, click a name for all their works). ABS has
+  no Narrator entity, so no photo/bio is possible there — initials only.
+- **Author bios** on the Author detail page, fetched from Audiobookshelf's
+  own author record.
+- **"Audio + ebook" library filter**, alongside the existing format/progress
+  ones — the books eligible for read-along in one place.
+- **Read-along status on library cards**: the mobile app's own 3-icon row
+  (headphones/book/"W"), plus a small badge to request a build straight
+  from the card for a dual-format book that doesn't have one yet.
+- **Real update-check**: Settings' "Update now" only appears when there's
+  an actual newer `VERSION` on the repo, with that version number and its
+  changelog entry shown underneath — previously the button was always
+  clickable whenever self-update was technically wired up, regardless of
+  whether there was anything to update to.
+
+### Fixed
+- Authors still fell back to a book cover when Audiobookshelf had no
+  headshot on file for them — direct regression against the "never a book
+  cover for a person" fix from 0.2.0 (the fallback logic was shared with
+  series tiles, which SHOULD show a cover, and wasn't gated by which kind
+  of tile it was). Authors/narrators now show initials in that case, never
+  a cover, full stop.
+
 ## [0.2.0] - 2026-09-16
 
 ### Added
