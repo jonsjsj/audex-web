@@ -53,6 +53,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read version
+        id: ver
+        # VERSION is the single source of truth — bump it + add a CHANGELOG.md
+        # section when there's something worth shipping. Settings' About panel
+        # and /api/health both show whatever this build was stamped with.
+        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -60,6 +67,7 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/audex-web
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.version }},enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
 
       - name: Build and push
@@ -68,6 +76,6 @@ jobs:
           context: .
           push: true
           build-args: |
-            APP_VERSION=0.1.0
+            APP_VERSION=${{ steps.ver.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

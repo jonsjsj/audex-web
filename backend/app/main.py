@@ -49,11 +49,24 @@ async def health():
 
 # Serve the built React SPA (see the root Dockerfile's frontend build stage).
 # Any non-/api route falls back to index.html so client-side routing works on a
-# hard refresh — the same pattern Codex's backend uses for its own SPA.
+# hard refresh — the same pattern Codex's backend uses for its own SPA. A path
+# that IS a real file under STATIC_DIR (e.g. /CHANGELOG.md, copied into
+# frontend/public/ so Vite bundles it) is served as itself first — without
+# this check every such file would silently 404-as-index.html instead of
+# returning its actual content.
 STATIC_DIR = "/app/static"
 if os.path.isdir(STATIC_DIR):
     app.mount("/assets", StaticFiles(directory=f"{STATIC_DIR}/assets"), name="assets")
 
+    STATIC_ROOT = os.path.realpath(STATIC_DIR)
+
     @app.get("/{path:path}")
     async def serve_spa(path: str):
+        # realpath resolves any ".." before the containment check below — a
+        # naive os.path.join alone would let a path like "../../etc/passwd"
+        # escape STATIC_DIR entirely.
+        candidate = os.path.realpath(os.path.join(STATIC_DIR, path))
+        in_static = candidate == STATIC_ROOT or candidate.startswith(STATIC_ROOT + os.sep)
+        if path and in_static and os.path.isfile(candidate):
+            return FileResponse(candidate)
         return FileResponse(f"{STATIC_DIR}/index.html")

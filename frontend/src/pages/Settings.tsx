@@ -164,7 +164,12 @@ export default function Settings() {
         <div className="settings-row">
           <div>
             <div className="settings-row-label">audex-web</div>
-            <div className="settings-row-sub">{version ? `v${version}` : "…"}</div>
+            <div className="settings-row-sub">
+              {version ? `v${version}` : "…"} ·{" "}
+              <a href="/CHANGELOG.md" target="_blank" rel="noreferrer">
+                Changelog
+              </a>
+            </div>
           </div>
           {updateAvailable ? (
             <button className="btn btn-secondary" style={{ width: "auto" }} onClick={triggerUpdate} disabled={updating}>
