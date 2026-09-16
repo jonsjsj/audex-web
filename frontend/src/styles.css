@@ -1305,8 +1305,10 @@ input:focus {
 /* ── Settings ─────────────────────────────────────────────────────────── */
 .settings {
   max-width: 32rem;
-  margin: 0 auto;
   padding-bottom: 3rem;
+  /* Not centered (margin: 0 auto) — that read as a floating box detached
+     from the sidebar. Sits flush against it instead, like every other
+     page in the shell. */
 }
 .settings-head {
   display: flex;
