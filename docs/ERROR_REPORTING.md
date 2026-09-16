@@ -43,9 +43,16 @@ def anon_code(item_id: str, secret_key: str) -> str:
   library item id for audex-web/codexaudio; Codex's `media_items.id` or
   `user_entries.id` for Codex — whatever id that app already uses
   internally, never a title/ISBN/external id).
-- **Key**: the app's own `SECRET_KEY` (already used for session/credential
-  encryption in every app here — this reuses it rather than adding a
-  second secret to manage). **Never share this key across apps** — a book
+- **Key**: derive a report-specific key from whatever secret-derivation
+  convention the app already has, rather than introducing a new one.
+  audex-web uses `SECRET_KEY` directly (its `security.py` has no HKDF
+  layer yet); Codex should instead go through its existing
+  `_derive_fernet_key()`-style HKDF-with-domain-separation pattern in
+  `core/security.py`, deriving a report-purpose key rather than reusing
+  `SECRET_KEY` raw — that's the more careful precedent already established
+  in that codebase, and this standard doesn't require byte-identical key
+  derivation across apps, only the same HMAC-SHA256→10-digit algorithm on
+  top of it. **Never share this key across apps** — a book
   that exists in both Codex and audex-web will (and should) get two
   *different* codes, one per app. The codes are not meant to correlate
   across apps, only across repeat reports *within* one app.
@@ -151,13 +158,21 @@ of this install," it is never itself included in the report.
   frontend `components/ErrorBoundary.tsx` (automatic) + a Settings dialog
   (manual) + inline "Report this problem" links on Player/Reader error
   screens (auto-attach that page's `itemId`).
-- **Codex**: has existing report *intake* infrastructure predating this
-  standard (see that repo's own docs for the current shape) — bringing
-  Codex onto this standard means adding the missing piece, a user-facing
-  in-app report action, using `anon_code()` keyed on Codex's own
-  `SECRET_KEY`/equivalent over its own media-item id space (books, movies,
-  TV, games — not just audiobooks), and routing it into GitHub the same way
-  rather than only through whatever channel existed before.
+- **Codex**: already has a complete, working, user-facing report system
+  predating this standard — `frontend/src/pages/ReportBugPage.jsx` (routed
+  at `/report-bug`, a sidebar nav item, not tucked in Settings), `POST
+  /bugs` (`backend/app/api/bugs.py`), a `bug_reports` DB table as the
+  source of truth, and existing best-effort mirrors to **both** GitHub
+  (`BUG_GITHUB_TOKEN`/`BUG_GITHUB_REPO`) and Planka. None of that needs
+  rebuilding. What Codex is missing, specifically, is the two things this
+  standard actually adds: (1) **automatic** crash capture — there's no
+  React error boundary anywhere in that frontend today, reports are 100%
+  user-typed; (2) **anonymization** — the existing `context` field sends
+  the raw page URL and full user-agent string unscrubbed into GitHub/
+  Planka, and there's no media-item reference field on a report at all
+  today, so `anon_code()` scrubbing is net-new, not a modification of
+  existing redaction (there isn't any). Both slot into the *existing* `POST
+  /bugs` endpoint and DB row rather than a parallel system.
 - **codexaudio (Android/Kotlin)**: no in-app report UI as of this writing.
   Adopting this standard here at minimum means: if/when one is built, the
   same `anon_code()` algorithm (portable to Kotlin — it's just
