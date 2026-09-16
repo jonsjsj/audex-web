@@ -14,6 +14,7 @@ any signed-in person can trigger it, same as every other write endpoint here.
 """
 import json
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +36,56 @@ def _client() -> httpx.AsyncClient:
 @router.get("/update/available")
 async def update_available(identity=Depends(get_current_identity)):
     return {"available": os.path.exists(settings.DOCKER_SOCK)}
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", v or "")
+    return tuple(int(p) for p in parts) or (0,)
+
+
+def _version_newer(latest: str, current: str) -> bool:
+    return _parse_version(latest) > _parse_version(current)
+
+
+def _changelog_entry_for(md: str, version: str) -> str | None:
+    """The one `## [x.y.z] ...` section matching `version`, body only (no
+    other releases' entries leak into what the button shows)."""
+    sections = re.split(r"^## \[", md, flags=re.MULTILINE)
+    for section in sections[1:]:
+        head, _, body = section.partition("]")
+        if head.strip() == version:
+            return body.strip()
+    return None
+
+
+@router.get("/update/check")
+async def update_check(identity=Depends(get_current_identity)):
+    """Compares the running version against VERSION on the repo's default
+    branch — the same file CI stamps every image with (see .github/
+    workflows/build.yml) — so "update available" reflects an actual newer
+    release, not just "the self-update capability exists." The Settings
+    button is only enabled when this says so."""
+    current = settings.APP_VERSION
+    base = f"https://raw.githubusercontent.com/{settings.UPDATE_REPO}/main"
+    latest = None
+    changelog_entry = None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            vr = await client.get(f"{base}/VERSION")
+            latest = vr.text.strip() if vr.status_code == 200 else None
+            if latest:
+                cr = await client.get(f"{base}/CHANGELOG.md")
+                if cr.status_code == 200:
+                    changelog_entry = _changelog_entry_for(cr.text, latest)
+    except httpx.HTTPError:
+        pass
+
+    return {
+        "currentVersion": current,
+        "latestVersion": latest,
+        "updateAvailable": bool(latest) and _version_newer(latest, current),
+        "changelogEntry": changelog_entry,
+    }
 
 
 @router.post("/update")

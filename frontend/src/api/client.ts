@@ -65,6 +65,13 @@ export interface BookDetail extends Book {
   asin: string | null;
 }
 
+export interface UpdateCheck {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  changelogEntry: string | null;
+}
+
 export interface BookGroup {
   name: string;
   books: Book[];
@@ -182,6 +189,10 @@ export const api = {
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/authors?libraryId=${encodeURIComponent(libraryId)}`),
+  authorBio: (authorId: string) =>
+    request<{ description: string | null }>(`/api/library/authors/${authorId}/bio`),
+  narrators: (libraryId: string) =>
+    request<BookGroup[]>(`/api/library/narrators?libraryId=${encodeURIComponent(libraryId)}`),
 
   play: (itemId: string) => request<PlaySession>(`/api/play/${itemId}`, { method: "POST" }),
   sync: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>
@@ -208,6 +219,8 @@ export const api = {
   updateSettings: (body: Partial<UserPrefs>) =>
     request<UserPrefs>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),
 
+  readAlongBulkStatus: (libraryId: string) =>
+    request<Record<string, boolean>>(`/api/readalong/bulk-status?libraryId=${encodeURIComponent(libraryId)}`),
   readAlongStatus: (itemId: string) => request<ReadAlongStatus>(`/api/readalong/${itemId}/status`),
   readAlongBuild: (itemId: string, ebookItemId?: string) =>
     request<{ ok: boolean; state?: string; eta_seconds?: number | null }>(`/api/readalong/${itemId}/build`, {
@@ -217,6 +230,7 @@ export const api = {
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
 
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
+  checkUpdate: () => request<UpdateCheck>("/api/admin/update/check"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
 
   reportAvailable: () => request<{ available: boolean }>("/api/report/available"),

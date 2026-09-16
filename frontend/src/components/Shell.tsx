@@ -67,6 +67,9 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
           <NavLink to="/authors" className="shell-nav-link">
             Authors
           </NavLink>
+          <NavLink to="/narrators" className="shell-nav-link">
+            Narrators
+          </NavLink>
         </nav>
 
         <NavLink to="/settings" className="shell-nav-link shell-settings-link">

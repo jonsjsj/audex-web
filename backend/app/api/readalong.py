@@ -11,12 +11,16 @@ login) can still use it.
 ABS-linked, same bar as Player/Reader) — it's never sent anywhere, since the
 proxied calls don't need it.
 """
+import asyncio
+
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.api.deps import get_abs_token
+from app.core import abs_client
+from app.core.abs_client import AbsError
 from app.core.config import align_gateway_url, settings
 
 router = APIRouter(prefix="/api/readalong", tags=["readalong"])
@@ -24,6 +28,45 @@ router = APIRouter(prefix="/api/readalong", tags=["readalong"])
 
 def _configured() -> bool:
     return bool(settings.CODEX_URL or settings.ALIGN_GATEWAY_URL)
+
+
+@router.get("/bulk-status")
+async def bulk_status(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+    """Read-along availability for every book in a library that could ever
+    have one (both an audio and an ebook edition on the SAME item) — powers
+    the library grid's third icon (docs/SYNC_API.md's "same item" case;
+    cross-item pairing isn't attempted, same scope limit as the rest of this
+    phase). Not configured, or no eligible books → {}, not an error."""
+    if not _configured():
+        return {}
+    try:
+        page = await abs_client.library_items(token, library_id)
+    except AbsError:
+        return {}
+    eligible = [
+        item["id"] for item in page.get("results", [])
+        if (item.get("media") or {}).get("ebookFile") and (item.get("media") or {}).get("numAudioFiles", 0) > 0
+    ]
+    if not eligible:
+        return {}
+
+    # Bounded concurrency — a library with a lot of dual-format books
+    # shouldn't fire 100+ simultaneous requests at the align gateway.
+    sem = asyncio.Semaphore(8)
+
+    async def _one(item_id: str) -> tuple[str, bool]:
+        async with sem:
+            try:
+                async with httpx.AsyncClient(timeout=8) as client:
+                    r = await client.get(f"{align_gateway_url()}/status/{item_id}")
+                if r.status_code == 200:
+                    return item_id, bool(r.json().get("available"))
+            except httpx.HTTPError:
+                pass
+        return item_id, False
+
+    results = await asyncio.gather(*(_one(i) for i in eligible))
+    return {item_id: available for item_id, available in results}
 
 
 @router.get("/{item_id}/status")

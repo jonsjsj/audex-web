@@ -31,12 +31,15 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "progress", label: "Progress" },
 ];
 
-// Mirrors the mobile app's WorkFilter (LibraryViewModel.kt) exactly.
-type FilterKey = "all" | "audio" | "ebook" | "progress";
+// Mirrors the mobile app's WorkFilter (LibraryViewModel.kt), plus "both" —
+// specifically the books eligible for read-along (needs both formats on one
+// item), which didn't have its own filter before.
+type FilterKey = "all" | "audio" | "ebook" | "both" | "progress";
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All formats" },
   { key: "audio", label: "Audiobook" },
   { key: "ebook", label: "Ebook" },
+  { key: "both", label: "Audio + ebook" },
   { key: "progress", label: "In progress" },
 ];
 
@@ -46,6 +49,8 @@ function filterBooks(books: Book[], key: FilterKey): Book[] {
       return books.filter((b) => b.numAudioFiles > 0);
     case "ebook":
       return books.filter((b) => b.hasEbook);
+    case "both":
+      return books.filter((b) => b.numAudioFiles > 0 && b.hasEbook);
     case "progress":
       return books.filter(isContinuable);
     case "all":
@@ -79,6 +84,7 @@ export default function Library() {
   const [sort, setSort] = useState<SortKey>("title");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [error, setError] = useState<string | null>(null);
+  const [alignMap, setAlignMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!libraryId) return;
@@ -91,6 +97,22 @@ export default function Library() {
     }, search ? 250 : 0); // debounce typing, but load the initial list instantly
     return () => clearTimeout(handle);
   }, [libraryId, search]);
+
+  // Read-along availability for the whole library in one call — powers the
+  // grid cards' third icon. Best-effort: a failed/slow fetch just leaves
+  // every card showing "not yet built" rather than blocking the page.
+  useEffect(() => {
+    if (!libraryId) return;
+    api.readAlongBulkStatus(libraryId).then(setAlignMap).catch(() => {});
+  }, [libraryId]);
+
+  // Fire-and-forget: no optimistic flip to "available" (it isn't yet — this
+  // only starts the build), and no per-card loading state to keep simple —
+  // re-visiting the library page after a while picks up the finished result
+  // via the bulk-status fetch above.
+  function requestAlign(itemId: string) {
+    api.readAlongBuild(itemId).catch(() => {});
+  }
 
   const continueBooks = useMemo(() => {
     if (!books || search) return []; // a search result isn't the place for a Continue rail
@@ -148,7 +170,14 @@ export default function Library() {
           <div className="lib-section-label">Continue</div>
           <div className="lib-grid">
             {continueBooks.map((b) => (
-              <BookCard key={`continue-${b.id}`} book={b} onNavigate={navigate} quickResume />
+              <BookCard
+                key={`continue-${b.id}`}
+                book={b}
+                onNavigate={navigate}
+                quickResume
+                aligned={alignMap[b.id]}
+                onRequestAlign={requestAlign}
+              />
             ))}
           </div>
         </section>
@@ -159,7 +188,7 @@ export default function Library() {
           {continueBooks.length > 0 && <div className="lib-section-label">All books</div>}
           <div className="lib-grid">
             {sortedBooks.map((b) => (
-              <BookCard key={b.id} book={b} onNavigate={navigate} />
+              <BookCard key={b.id} book={b} onNavigate={navigate} aligned={alignMap[b.id]} onRequestAlign={requestAlign} />
             ))}
           </div>
         </section>
@@ -171,17 +200,33 @@ export default function Library() {
 /** [quickResume]: Continue-rail cards jump straight into Play/Read (you
  *  tapped it to keep going); ordinary library-grid cards open the book info
  *  page instead, same as Codex's own browse cards — a media app you're
- *  scanning wants details first, one you're actively mid-book wants speed. */
-export function BookCard({ book: b, onNavigate, quickResume }: { book: Book; onNavigate: (href: string) => void; quickResume?: boolean }) {
+ *  scanning wants details first, one you're actively mid-book wants speed.
+ *  [aligned]: undefined = not eligible or not checked yet, false = eligible
+ *  but no map built, true = read-along ready — the mobile app's own
+ *  headphones/book/"W" three-icon row, mirrored here. */
+export function BookCard({
+  book: b,
+  onNavigate,
+  quickResume,
+  aligned,
+  onRequestAlign,
+}: {
+  book: Book;
+  onNavigate: (href: string) => void;
+  quickResume?: boolean;
+  aligned?: boolean;
+  onRequestAlign?: (itemId: string) => void;
+}) {
   const hasAudio = b.numAudioFiles > 0;
+  const bothFormats = hasAudio && b.hasEbook;
   const primaryHref = quickResume ? (hasAudio ? `/play/${b.id}` : `/read/${b.id}`) : `/book/${b.id}`;
   const showProgress = b.progress > 0.001 && !b.isFinished;
   return (
     <div className="lib-card-wrap">
       {/* A <button> can't contain another focusable element (invalid HTML,
           and the browser will hoist it out of the DOM tree unpredictably) —
-          the Read badge is a sibling button absolutely positioned over the
-          cover by CSS, not nested. */}
+          the Read/align badges are sibling buttons absolutely positioned
+          over the cover by CSS, not nested. */}
       <button className="lib-card" onClick={() => onNavigate(primaryHref)}>
         <div className="lib-cover">
           <img src={b.coverUrl} alt="" loading="lazy" />
@@ -194,11 +239,34 @@ export function BookCard({ book: b, onNavigate, quickResume }: { book: Book; onN
         <div className="lib-title">{b.title}</div>
         {b.author && <div className="lib-author">{b.author}</div>}
         {b.series && <div className="lib-series">{b.series}</div>}
+        <div className="lib-format-icons" aria-hidden>
+          <span className={`lib-format-icon ${hasAudio ? "on" : ""}`} title="Audiobook">
+            🎧
+          </span>
+          <span className={`lib-format-icon ${b.hasEbook ? "on" : ""}`} title="Ebook">
+            📖
+          </span>
+          {bothFormats && (
+            <span className={`lib-align-icon ${aligned ? "on" : ""}`} title={aligned ? "Read-along ready" : "Read-along not built"}>
+              W
+            </span>
+          )}
+        </div>
         {formatDuration(b.durationS) && <div className="lib-duration">{formatDuration(b.durationS)}</div>}
       </button>
-      {quickResume && hasAudio && b.hasEbook && (
+      {quickResume && bothFormats && (
         <button className="lib-read-badge" aria-label={`Read ${b.title}`} onClick={() => onNavigate(`/read/${b.id}`)}>
           Read
+        </button>
+      )}
+      {bothFormats && aligned === false && onRequestAlign && (
+        <button
+          className="lib-align-badge"
+          aria-label={`Request read-along for ${b.title}`}
+          title="Request read-along"
+          onClick={() => onRequestAlign(b.id)}
+        >
+          +
         </button>
       )}
     </div>

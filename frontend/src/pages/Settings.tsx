@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
 
 export default function Settings() {
@@ -9,8 +9,9 @@ export default function Settings() {
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
-  const [version, setVersion] = useState<string | null>(null);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateCapable, setUpdateCapable] = useState(false);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -22,9 +23,16 @@ export default function Settings() {
   const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.health().then((h) => setVersion(h.version)).catch(() => {});
-    api.updateAvailable().then((r) => setUpdateAvailable(r.available)).catch(() => {});
+    api.updateAvailable().then((r) => setUpdateCapable(r.available)).catch(() => {});
     api.reportAvailable().then((r) => setReportAvailable(r.available)).catch(() => {});
+  }, []);
+
+  // Separate from the capability check above — this is "is there an actual
+  // newer release," which is what decides whether the button can be clicked
+  // at all, not just whether self-update is wired up on this deploy.
+  useEffect(() => {
+    setCheckingUpdate(true);
+    api.checkUpdate().then(setUpdateCheck).catch(() => {}).finally(() => setCheckingUpdate(false));
   }, []);
 
   async function submitReport() {
@@ -165,20 +173,34 @@ export default function Settings() {
           <div>
             <div className="settings-row-label">audex-web</div>
             <div className="settings-row-sub">
-              {version ? `v${version}` : "…"} ·{" "}
+              {updateCheck ? `v${updateCheck.currentVersion}` : "…"} ·{" "}
               <a href="/CHANGELOG.md" target="_blank" rel="noreferrer">
                 Changelog
               </a>
             </div>
           </div>
-          {updateAvailable ? (
+          {!updateCapable ? (
+            <span className="settings-row-sub">Self-update not set up on this deploy</span>
+          ) : checkingUpdate ? (
+            <span className="settings-row-sub">Checking…</span>
+          ) : updateCheck?.updateAvailable ? (
             <button className="btn btn-secondary" style={{ width: "auto" }} onClick={triggerUpdate} disabled={updating}>
-              {updating ? "Updating…" : "Update now"}
+              {updating ? "Updating…" : `Update to v${updateCheck.latestVersion}`}
             </button>
           ) : (
-            <span className="settings-row-sub">Self-update not set up on this deploy</span>
+            <span className="settings-row-sub">Up to date</span>
           )}
         </div>
+        {/* Only shown once there's actually something to update to — the
+            version number + what's in it, right under the button, per the
+            explicit ask. */}
+        {updateCheck?.updateAvailable && updateCheck.changelogEntry && (
+          <p className="settings-help settings-update-preview">
+            <strong>v{updateCheck.latestVersion}</strong>
+            {"\n"}
+            {updateCheck.changelogEntry}
+          </p>
+        )}
         {updateMessage && <p className="settings-help">{updateMessage}</p>}
         {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
       </section>

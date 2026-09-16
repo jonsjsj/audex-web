@@ -8,6 +8,8 @@ import BookDetail from "./pages/BookDetail";
 import LinkAbs from "./pages/LinkAbs";
 import Library from "./pages/Library";
 import Login from "./pages/Login";
+import NarratorDetail from "./pages/NarratorDetail";
+import Narrators from "./pages/Narrators";
 import Player from "./pages/Player";
 import Series from "./pages/Series";
 import SeriesDetail from "./pages/SeriesDetail";
@@ -60,6 +62,8 @@ export default function App() {
         <Route path="series/:name" element={<SeriesDetail />} />
         <Route path="authors" element={<Authors />} />
         <Route path="authors/:name" element={<AuthorDetail />} />
+        <Route path="narrators" element={<Narrators />} />
+        <Route path="narrators/:name" element={<NarratorDetail />} />
         <Route path="book/:itemId" element={<BookDetail />} />
         <Route path="play/:itemId" element={<Player />} />
         <Route

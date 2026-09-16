@@ -90,7 +90,16 @@ export default function BookDetail() {
 
           <div className="book-detail-tags">
             {duration && <span className="tag">{duration}</span>}
-            {book.narrator && <span className="tag">Read by {book.narrator}</span>}
+            {book.narrator &&
+              book.narrator.split(",").map((n) => n.trim()).filter(Boolean).map((n) => (
+                <button
+                  key={n}
+                  className="tag book-detail-narrator-tag"
+                  onClick={() => navigate(`/narrators/${encodeURIComponent(n)}`)}
+                >
+                  Read by {n}
+                </button>
+              ))}
             {book.publishedYear && <span className="tag">{book.publishedYear}</span>}
             {book.language && <span className="tag">{book.language}</span>}
           </div>

@@ -28,6 +28,7 @@ export default function Authors() {
       title="Authors"
       groups={groups}
       storageKey="authors"
+      isPerson
       onOpen={(name) => navigate(`/authors/${encodeURIComponent(name)}`)}
     />
   );

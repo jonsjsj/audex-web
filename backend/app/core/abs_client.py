@@ -157,6 +157,15 @@ def author_image_url(author_id: str) -> str:
     return f"{_base()}/api/authors/{author_id}/image"
 
 
+async def author_detail(token: str, author_id: str) -> dict | None:
+    """GET /api/authors/{id} → {id, name, description, imagePath, ...} — the
+    bio shown on the Author detail page. None if ABS 404s (a stale/unmatched
+    id), not raised — the page just skips the bio section."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_base()}/api/authors/{author_id}", headers=_auth(token))
+    return r.json() if r.status_code == 200 else None
+
+
 def stream_url(path: str) -> str:
     """[path] is one audio track's ABS-relative `contentUrl` (e.g.
     `/api/items/<id>/file/<ino>`), as returned verbatim by start_play() — the

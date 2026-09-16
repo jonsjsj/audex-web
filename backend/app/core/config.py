@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     DOCKER_SOCK: str = "/var/run/docker.sock"
     UPDATE_IMAGE: str = "ghcr.io/jonsjsj/audex-web:latest"
     UPDATE_CONTAINER_NAME: str = "audex-web"
+    UPDATE_REPO: str = "jonsjsj/audex-web"  # owner/repo — where VERSION/CHANGELOG.md are checked
 
     # ── Problem reports (Settings → "Report a problem", + automatic crash
     # capture) — filed as GitHub issues. No personal data leaves this

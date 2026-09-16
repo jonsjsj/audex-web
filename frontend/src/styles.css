@@ -171,6 +171,15 @@ input:focus {
   color: var(--audio);
   border-color: color-mix(in oklab, var(--audio) 40%, var(--line));
 }
+.book-detail-narrator-tag {
+  background: none;
+  font-family: var(--mono);
+  cursor: pointer;
+  color: var(--accent);
+}
+.book-detail-narrator-tag:hover {
+  background: var(--surface-2);
+}
 
 .row {
   display: flex;
@@ -356,6 +365,52 @@ input:focus {
 .lib-read-badge:hover {
   background: var(--accent);
   color: #201400;
+}
+.lib-align-badge {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+  color: var(--surface);
+  border: none;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+}
+.lib-align-badge:hover {
+  background: var(--accent);
+  color: #201400;
+}
+.lib-format-icons {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+.lib-format-icon {
+  font-size: 0.72rem;
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+.lib-format-icon.on {
+  filter: none;
+  opacity: 1;
+}
+.lib-align-icon {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.lib-align-icon.on {
+  color: var(--accent);
 }
 .lib-cover {
   position: relative;
@@ -564,6 +619,44 @@ input:focus {
   font-family: var(--mono);
   font-size: 0.76rem;
   color: var(--muted);
+}
+
+/* ── Person detail (Author / Narrator) ───────────────────────────────── */
+.person-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.2rem;
+  padding: 0.4rem 1.5rem 1.2rem;
+}
+.person-detail-avatar {
+  flex: none;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+}
+.person-detail-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.person-detail-avatar span {
+  font-family: var(--serif);
+  font-size: 1.9rem;
+  font-weight: 650;
+  color: var(--accent);
+}
+.person-detail-bio {
+  margin: 0.6rem 0 0;
+  max-width: 42rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
 }
 
 /* ── Book detail (info page) ─────────────────────────────────────────── */
@@ -1348,6 +1441,15 @@ input:focus {
   color: var(--ink-soft);
   line-height: 1.5;
   margin: 0 0 0.9rem;
+}
+.settings-update-preview {
+  white-space: pre-line; /* preserves the changelog entry's own line breaks */
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+}
+.settings-update-preview strong {
+  color: var(--accent);
 }
 .settings-row {
   display: flex;

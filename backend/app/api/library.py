@@ -135,6 +135,13 @@ def _author_entries(item: dict) -> list[tuple[str, str | None]]:
     return []
 
 
+def _narrator_names(item: dict) -> list[str]:
+    """ABS has no dedicated Narrator entity (no id, no image, no bio API —
+    unlike Author) — just a flat string list on the book's own metadata."""
+    meta = (item.get("media") or {}).get("metadata") or {}
+    return [n.strip() for n in (meta.get("narrators") or []) if (n or "").strip()]
+
+
 @router.get("/libraries")
 async def get_libraries(token: str = Depends(get_abs_token)):
     try:
@@ -265,6 +272,42 @@ async def get_authors(library_id: str = Query(..., alias="libraryId"), token: st
     ]
     result.sort(key=lambda g: g["name"].lower())
     return result
+
+
+@router.get("/narrators")
+async def get_narrators(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+    """Same idea as /authors, grouped by narrator instead. No id/imageUrl —
+    ABS has no Narrator entity to look either up from (see _narrator_names)."""
+    try:
+        page = await abs_client.library_items(token, library_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    progress = await _progress_by_item(token)
+    groups: dict[str, list[dict]] = {}
+    for item in page.get("results", []):
+        names = _narrator_names(item)
+        if not names:
+            continue
+        book = _book_summary(item, progress.get(item["id"]))
+        for name in names:
+            groups.setdefault(name, []).append(book)
+    result = [
+        {"name": name, "books": sorted(books, key=lambda b: b["title"].lower())}
+        for name, books in groups.items()
+    ]
+    result.sort(key=lambda g: g["name"].lower())
+    return result
+
+
+@router.get("/authors/{author_id}/bio")
+async def get_author_bio(author_id: str, token: str = Depends(get_abs_token)):
+    """A one-off ABS call, not embedded in /authors' list response — a bio can
+    run to a paragraph or more, not worth shipping for every author on every
+    library load when only the one being opened needs it."""
+    detail = await abs_client.author_detail(token, author_id)
+    if not detail:
+        return {"description": None}
+    return {"description": detail.get("description")}
 
 
 @router.get("/authors/{author_id}/image")
