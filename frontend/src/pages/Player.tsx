@@ -12,6 +12,10 @@ const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
 // row — auto-drops a "you were here" bookmark at the position you jumped
 // FROM, so an accidental big seek is always one tap away from undoing.
 const AUTO_BOOKMARK_JUMP_S = 120;
+// Decorative, not audio-derived — mirrors the native app's own fixed
+// waveform silhouette exactly (its source comments say the same: hand-tuned
+// from the design mockup, not real amplitude data).
+const WAVEFORM_BARS = [0.3, 0.62, 0.44, 0.82, 0.55, 1.0, 0.7, 0.9, 0.48, 0.76, 0.38, 0.66];
 
 function formatTime(totalS: number): string {
   if (!Number.isFinite(totalS) || totalS < 0) totalS = 0;
@@ -22,6 +26,17 @@ function formatTime(totalS: number): string {
   return h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
     : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** Parses the Go To dialog's free-typed time — "90", "12:34", or "1:02:03". */
+function parseTimeInput(raw: string): number | null {
+  const parts = raw.trim().split(":").map((p) => p.trim());
+  if (parts.length === 0 || parts.some((p) => p === "" || !/^\d+$/.test(p))) return null;
+  const nums = parts.map(Number);
+  if (nums.length === 1) return nums[0];
+  if (nums.length === 2) return nums[0] * 60 + nums[1];
+  if (nums.length === 3) return nums[0] * 3600 + nums[1] * 60 + nums[2];
+  return null;
 }
 
 /** Which track covers overall second [posS], and how far into it. */
@@ -58,8 +73,17 @@ export default function Player() {
   const [sleepRemainingS, setSleepRemainingS] = useState<number | null>(null);
   const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
-  const [addingBookmark, setAddingBookmark] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"chapters" | "bookmarks">("chapters");
+  const [confirmRemoveTimeS, setConfirmRemoveTimeS] = useState<number | null>(null);
+
+  const [goToOpen, setGoToOpen] = useState(false);
+  const [goToValue, setGoToValue] = useState("");
+  const [goToError, setGoToError] = useState<string | null>(null);
+
+  const [addBookmarkOpen, setAddBookmarkOpen] = useState(false);
+  const [addBookmarkNote, setAddBookmarkNote] = useState("");
+  const [addingBookmark, setAddingBookmark] = useState(false);
 
   // Cross-format jump (docs/SYNC_API.md §3) — only worth polling/building for
   // a book that could ever have both an audio and an ebook edition.
@@ -350,19 +374,36 @@ export default function Player() {
       .catch(() => {});
   }
 
-  async function addBookmark() {
+  function openAddBookmark() {
+    setAddBookmarkNote(`Left off · ${formatTime(positionRef.current)}`);
+    setAddBookmarkOpen(true);
+  }
+
+  async function submitAddBookmark() {
     if (!itemId || addingBookmark) return;
     setAddingBookmark(true);
     const timeS = positionRef.current;
-    const title = `Left off · ${formatTime(timeS)}`;
+    const title = addBookmarkNote.trim() || `Left off · ${formatTime(timeS)}`;
     try {
       await api.addBookmark(itemId, { timeS, title });
       setBookmarks((prev) => [...prev, { timeS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
+      setAddBookmarkOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save bookmark.");
     } finally {
       setAddingBookmark(false);
     }
+  }
+
+  /** Two-tap remove (tap "Remove" → it becomes "Remove?" → tap again) — no
+   *  dialog, mirrors the mobile app's own bookmark row exactly. */
+  function onBookmarkRemoveClick(timeS: number) {
+    if (confirmRemoveTimeS !== timeS) {
+      setConfirmRemoveTimeS(timeS);
+      return;
+    }
+    setConfirmRemoveTimeS(null);
+    removeBookmark(timeS);
   }
 
   async function removeBookmark(timeS: number) {
@@ -374,6 +415,33 @@ export default function Player() {
     } catch {
       setBookmarks(prev);
     }
+  }
+
+  function openGoTo() {
+    setGoToValue("");
+    setGoToError(null);
+    setGoToOpen(true);
+  }
+
+  function submitGoTo() {
+    const target = parseTimeInput(goToValue);
+    if (target === null) {
+      setGoToError("Enter a time like 12:34 or 1:02:03.");
+      return;
+    }
+    seekTo(target);
+    setGoToOpen(false);
+  }
+
+  /** The Go To dialog's "jump to where you're reading" row — an on-demand
+   *  version of the auto-resume effect above, for whenever you want to sync
+   *  up mid-listen rather than only at the moment you opened the player. */
+  function jumpToReadingPosition() {
+    if (!book || !readAlong.map) return;
+    const target = timeAtProgression(readAlong.map, book.ebookProgress);
+    if (target === null) return;
+    seekTo(target);
+    setGoToOpen(false);
   }
 
   const [discarding, setDiscarding] = useState(false);
@@ -409,83 +477,118 @@ export default function Player() {
 
   const shown = scrubbing ?? positionS;
   const currentChapter = session.chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
+  const progressFrac = session.durationS > 0 ? shown / session.durationS : 0;
+  const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
+  const readingAheadS = book.hasEbook && readAlong.map ? timeAtProgression(readAlong.map, book.ebookProgress) : null;
+  const showJumpToReading = readingAheadS !== null && readingAheadS - shown > 20;
 
   return (
     <div className="player-wrap">
-      <button className="player-back" onClick={() => navigate("/")}>
-        ← Library
-      </button>
-
-      <div className="player-cover">
-        <img src={book.coverUrl} alt="" />
+      <div className="player-hero">
+        <img className="player-hero-cover" src={book.coverUrl} alt="" />
+        <div className="player-hero-scrim" />
+        <span className="player-hero-eyebrow">NOW PLAYING</span>
+        <div className="player-hero-text">
+          <h1 className="player-title">{book.title}</h1>
+          {book.author && <p className="player-author">{book.author}</p>}
+        </div>
       </div>
 
-      <h1 className="player-title">{book.title}</h1>
-      {book.author && <p className="player-author">{book.author}</p>}
-
-      {currentChapter && <p className="player-chapter">{currentChapter.title}</p>}
       {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
 
-      <div className="player-scrub">
-        <div className="player-scrub-track">
-          <input
-            type="range"
-            min={0}
-            max={session.durationS || 1}
-            step={1}
-            value={shown}
-            onChange={(e) => setScrubbing(Number(e.target.value))}
-            onMouseUp={() => {
-              if (scrubbing !== null) seekTo(scrubbing);
-              setScrubbing(null);
-            }}
-            onTouchEnd={() => {
-              if (scrubbing !== null) seekTo(scrubbing);
-              setScrubbing(null);
-            }}
-          />
-          {/* One tick per chapter BOUNDARY, not per chapter — the first
-              chapter's own start is 0, the very edge of the track, not a
-              meaningful mark. pointer-events:none (see CSS) so this overlay
-              never steals the drag from the range input underneath it. */}
-          {session.chapters.length > 1 && session.durationS > 0 && (
-            <div className="player-scrub-ticks">
-              {session.chapters.slice(1).map((c) => (
-                <div key={c.id} className="player-scrub-tick" style={{ left: `${(c.startS / session.durationS) * 100}%` }} />
-              ))}
-            </div>
-          )}
+      <div className="player-progress-section">
+        <p className="player-current-chapter">{currentChapter?.title ?? ""}</p>
+
+        <div className="player-scrub">
+          <div className="player-scrub-track">
+            <input
+              type="range"
+              min={0}
+              max={session.durationS || 1}
+              step={1}
+              value={shown}
+              onChange={(e) => setScrubbing(Number(e.target.value))}
+              onMouseUp={() => {
+                if (scrubbing !== null) seekTo(scrubbing);
+                setScrubbing(null);
+              }}
+              onTouchEnd={() => {
+                if (scrubbing !== null) seekTo(scrubbing);
+                setScrubbing(null);
+              }}
+            />
+            {/* One tick per chapter BOUNDARY, not per chapter — the first
+                chapter's own start is 0, the very edge of the track, not a
+                meaningful mark. pointer-events:none (see CSS) so this overlay
+                never steals the drag from the range input underneath it. */}
+            {session.chapters.length > 1 && session.durationS > 0 && (
+              <div className="player-scrub-ticks">
+                {session.chapters.slice(1).map((c) => (
+                  <div key={c.id} className="player-scrub-tick" style={{ left: `${(c.startS / session.durationS) * 100}%` }} />
+                ))}
+              </div>
+            )}
+            {/* Bookmarks as small dots directly on the track — visible +
+                tappable without switching to the Bookmarks tab below. */}
+            {session.durationS > 0 && bookmarks.length > 0 && (
+              <div className="player-scrub-marks">
+                {bookmarks.map((bm) => (
+                  <button
+                    key={bm.timeS}
+                    className="player-scrub-mark"
+                    style={{ left: `${(bm.timeS / session.durationS) * 100}%` }}
+                    onClick={() => seekTo(bm.timeS)}
+                    aria-label={`Jump to bookmark: ${bm.title}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+
+        <div className="player-waveform" aria-hidden>
+          {WAVEFORM_BARS.map((h, i) => (
+            <div key={i} className={`player-wave-bar ${i < litBars ? "lit" : ""}`} style={{ height: `${h * 100}%` }} />
+          ))}
+        </div>
+
         <div className="player-times">
           <span>{formatTime(shown)}</span>
           <span>-{formatTime(session.durationS - shown)}</span>
+          <span>{formatTime(session.durationS)}</span>
         </div>
       </div>
 
       <div className="player-transport">
         <button className="player-skip" onClick={() => skip(-SKIP_S)} aria-label={`Back ${SKIP_S}s`}>
-          ⟲ {SKIP_S}
+          ⟲<span className="player-skip-n">{SKIP_S}</span>
         </button>
         <button className="player-play" onClick={togglePlayPause} aria-label={isPlaying ? "Pause" : "Play"}>
           {isPlaying ? "❚❚" : "▶"}
         </button>
         <button className="player-skip" onClick={() => skip(SKIP_S)} aria-label={`Forward ${SKIP_S}s`}>
-          {SKIP_S} ⟳
+          <span className="player-skip-n">{SKIP_S}</span>⟳
         </button>
       </div>
 
       <div className="player-utility">
         <button className="player-util-cell" onClick={cycleSpeed}>
-          <span className="v">{speed}×</span>
+          <span className={`v ${speed !== 1 ? "accent" : ""}`}>{speed}×</span>
           <span className="l">SPEED</span>
         </button>
         <button className="player-util-cell" onClick={cycleSleep}>
-          <span className="v">{sleepRemainingS !== null ? formatTime(sleepRemainingS) : "Off"}</span>
+          <span className={`v ${sleepRemainingS !== null ? "accent" : ""}`}>
+            {sleepRemainingS !== null ? formatTime(sleepRemainingS) : "Off"}
+          </span>
           <span className="l">SLEEP</span>
         </button>
-        <button className="player-util-cell" onClick={addBookmark} disabled={addingBookmark}>
-          <span className="v">{addingBookmark ? "…" : "+"}</span>
+        <button className="player-util-cell" onClick={openAddBookmark}>
+          <span className="v">+</span>
           <span className="l">BOOKMARK</span>
+        </button>
+        <button className="player-util-cell" onClick={openGoTo}>
+          <span className="v">⌖</span>
+          <span className="l">GO TO</span>
         </button>
       </div>
 
@@ -495,16 +598,25 @@ export default function Player() {
             <button className="player-readalong-jump" onClick={jumpToText}>
               Jump to text ↦
             </button>
-          ) : readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
-            <div className="player-readalong-status">
-              <span>Building word sync…</span>
-              {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
-            </div>
           ) : (
-            <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
-              Build read-along
+            // No read-along map yet (or none configured) — a plain format
+            // switch shouldn't have to wait on that; it just opens the
+            // reader at wherever your own reading position last was.
+            <button className="player-readalong-jump" onClick={() => navigate(`/read/${itemId}`)}>
+              Read this book ↦
             </button>
           )}
+          {!readAlong.map &&
+            (readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+              <div className="player-readalong-status">
+                <span>Building word sync…</span>
+                {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
+              </div>
+            ) : (
+              <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
+                Build read-along
+              </button>
+            ))}
           {readAlong.error && (
             <p className="error" style={{ margin: 0 }}>
               {readAlong.error}
@@ -513,11 +625,35 @@ export default function Player() {
         </div>
       )}
 
-      {bookmarks.length > 0 && (
-        <div className="player-chapters">
-          <div className="l" style={{ marginBottom: ".5rem" }}>
-            BOOKMARKS
+      <div className="player-tabs">
+        <button className={`player-tab ${activeTab === "chapters" ? "active" : ""}`} onClick={() => setActiveTab("chapters")}>
+          Chapters
+        </button>
+        <button className={`player-tab ${activeTab === "bookmarks" ? "active" : ""}`} onClick={() => setActiveTab("bookmarks")}>
+          Bookmarks{bookmarks.length > 0 ? ` (${bookmarks.length})` : ""}
+        </button>
+      </div>
+
+      {activeTab === "chapters" ? (
+        session.chapters.length > 0 ? (
+          <div className="player-tab-list">
+            {session.chapters.map((c, i) => (
+              <button
+                key={c.id}
+                className={`player-chapter-row ${c === currentChapter ? "active" : ""}`}
+                onClick={() => seekTo(c.startS)}
+              >
+                <span className="player-chapter-idx">{String(i + 1).padStart(2, "0")}</span>
+                <span className="player-chapter-title">{c.title}</span>
+                <span className="t">{formatTime(c.startS)}</span>
+              </button>
+            ))}
           </div>
+        ) : (
+          <p className="sub" style={{ padding: "0.6rem 0.1rem" }}>No chapters for this book.</p>
+        )
+      ) : bookmarks.length > 0 ? (
+        <div className="player-tab-list">
           {bookmarks.map((bm) => (
             <div key={bm.timeS} className="player-chapter-row player-bookmark-row">
               <button className="player-bookmark-jump" onClick={() => seekTo(bm.timeS)}>
@@ -525,33 +661,16 @@ export default function Player() {
                 <span className="t">{formatTime(bm.timeS)}</span>
               </button>
               <button
-                className="player-bookmark-remove"
-                onClick={() => removeBookmark(bm.timeS)}
-                aria-label={`Remove bookmark at ${formatTime(bm.timeS)}`}
+                className={`player-bookmark-remove ${confirmRemoveTimeS === bm.timeS ? "confirm" : ""}`}
+                onClick={() => onBookmarkRemoveClick(bm.timeS)}
               >
-                ×
+                {confirmRemoveTimeS === bm.timeS ? "Remove?" : "Remove"}
               </button>
             </div>
           ))}
         </div>
-      )}
-
-      {session.chapters.length > 0 && (
-        <div className="player-chapters">
-          <div className="l" style={{ marginBottom: ".5rem" }}>
-            CHAPTERS
-          </div>
-          {session.chapters.map((c) => (
-            <button
-              key={c.id}
-              className={`player-chapter-row ${c === currentChapter ? "active" : ""}`}
-              onClick={() => seekTo(c.startS)}
-            >
-              <span>{c.title}</span>
-              <span className="t">{formatTime(c.startS)}</span>
-            </button>
-          ))}
-        </div>
+      ) : (
+        <p className="sub" style={{ padding: "0.6rem 0.1rem" }}>No bookmarks yet.</p>
       )}
 
       <button className="player-discard" onClick={discardProgress} disabled={discarding}>
@@ -571,6 +690,62 @@ export default function Player() {
         }}
         onLoadedMetadata={onLoadedMetadata}
       />
+
+      {goToOpen && (
+        <div className="player-dialog-backdrop" onClick={() => setGoToOpen(false)}>
+          <div className="player-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Go to</h3>
+            {showJumpToReading && readingAheadS !== null && (
+              <>
+                <button className="player-dialog-reading-jump" onClick={jumpToReadingPosition}>
+                  Jump to where you're reading ({formatTime(readingAheadS)})
+                </button>
+                <div className="divider">or</div>
+              </>
+            )}
+            <input
+              className="settings-input"
+              placeholder="12:34 or 1:02:03"
+              value={goToValue}
+              onChange={(e) => setGoToValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitGoTo()}
+              autoFocus
+            />
+            {goToError && <div className="error" style={{ marginTop: "0.6rem" }}>{goToError}</div>}
+            <div className="player-dialog-actions">
+              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setGoToOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={submitGoTo}>
+                Go
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addBookmarkOpen && (
+        <div className="player-dialog-backdrop" onClick={() => setAddBookmarkOpen(false)}>
+          <div className="player-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Add bookmark</h3>
+            <input
+              className="settings-input"
+              value={addBookmarkNote}
+              onChange={(e) => setAddBookmarkNote(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitAddBookmark()}
+              autoFocus
+            />
+            <div className="player-dialog-actions">
+              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setAddBookmarkOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={submitAddBookmark} disabled={addingBookmark}>
+                {addingBookmark ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useOutletContext } from "react-router-dom";
-import { api, Library as LibraryModel } from "../api/client";
+import { api, Library as LibraryModel, Me } from "../api/client";
 
 export interface ShellContext {
   libraries: LibraryModel[] | null;
   libraryId: string | null;
   error: string | null;
+  me: Me;
+  onChanged: () => void;
+  onSignedOut: () => void;
 }
 
-/** The persistent side nav for every library-browsing page (Library, Series,
- *  Authors, Book info) — a left rail rather than a top bar, so switching
- *  between them doesn't re-layout the page each time. Player/Reader stay
- *  OUTSIDE this shell (immersive, no chrome around them) — see
- *  docs/AUDEX_NAVIGATION.md's "immersive reader/player" principle. */
-export default function Shell() {
+/** The persistent side nav — every page lives inside this now, Player and
+ *  Reader included: a visible "you are here" rail beats an empty full-bleed
+ *  page, and it's one less back-button to build per page. */
+export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChanged: () => void; onSignedOut: () => void }) {
   const [libraries, setLibraries] = useState<LibraryModel[] | null>(null);
   const [libraryId, setLibraryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +31,7 @@ export default function Shell() {
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load your libraries."));
   }, []);
 
-  const ctx: ShellContext = { libraries, libraryId, error };
+  const ctx: ShellContext = { libraries, libraryId, error, me, onChanged, onSignedOut };
 
   return (
     <div className="shell">
@@ -74,7 +75,11 @@ export default function Shell() {
       </aside>
 
       <main className="shell-main">
-        {error ? <div className="error" style={{ margin: "1.5rem" }}>{error}</div> : <Outlet context={ctx} />}
+        {/* Not gated on `error` — a failed /libraries fetch shouldn't lock
+            Settings or the Player out too; Library/Series/Authors already
+            handle a null libraryId (which this same failure also causes) on
+            their own, and Settings/Player/Reader don't need libraryId at all. */}
+        <Outlet context={ctx} />
       </main>
     </div>
   );

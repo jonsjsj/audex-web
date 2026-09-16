@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Me } from "../api/client";
+import { api } from "../api/client";
+import { useShell } from "../components/Shell";
 
-export default function Settings({ me, onChanged, onSignedOut }: { me: Me; onChanged: () => void; onSignedOut: () => void }) {
+export default function Settings() {
   const navigate = useNavigate();
+  const { me, onChanged, onSignedOut } = useShell();
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);

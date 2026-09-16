@@ -73,7 +73,7 @@ function sortBooks(books: Book[], key: SortKey): Book[] {
 
 export default function Library() {
   const navigate = useNavigate();
-  const { libraryId } = useShell();
+  const { libraryId, error: shellError } = useShell();
   const [books, setBooks] = useState<Book[] | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("title");
@@ -130,9 +130,9 @@ export default function Library() {
         </select>
       </header>
 
-      {error && <div className="error" style={{ margin: "1rem 1.5rem" }}>{error}</div>}
+      {(shellError || error) && <div className="error" style={{ margin: "1rem 1.5rem" }}>{shellError || error}</div>}
 
-      {!error && !books && <p className="sub" style={{ padding: "0 1.5rem" }}>Loading your library…</p>}
+      {!shellError && !error && !books && <p className="sub" style={{ padding: "0 1.5rem" }}>Loading your library…</p>}
 
       {books && books.length === 0 && (
         <p className="sub" style={{ padding: "0 1.5rem" }}>

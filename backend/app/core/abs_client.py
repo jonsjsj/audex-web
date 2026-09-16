@@ -147,6 +147,16 @@ def cover_url(item_id: str) -> str:
     return f"{_base()}/api/items/{item_id}/cover"
 
 
+def author_image_url(author_id: str) -> str:
+    """ABS's real Author entity (distinct from the plain name string on a
+    book's metadata) carries an optional headshot once the author's been
+    matched via an author-search provider in ABS itself — same idea as
+    cover_url() above, proxied server-side for the same reason (an <img> tag
+    can't carry the Bearer token). 404s when the author has no image, which
+    the frontend treats as "no headshot" rather than an error."""
+    return f"{_base()}/api/authors/{author_id}/image"
+
+
 def stream_url(path: str) -> str:
     """[path] is one audio track's ABS-relative `contentUrl` (e.g.
     `/api/items/<id>/file/<ino>`), as returned verbatim by start_play() — the

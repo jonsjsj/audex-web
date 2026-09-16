@@ -44,36 +44,6 @@ export default function App() {
         }
       />
       <Route
-        path="/play/:itemId"
-        element={
-          !me ? <Navigate to="/login" replace /> : !me.absLinked ? <Navigate to="/link-abs" replace /> : <Player />
-        }
-      />
-      <Route
-        path="/read/:itemId"
-        element={
-          !me ? (
-            <Navigate to="/login" replace />
-          ) : !me.absLinked ? (
-            <Navigate to="/link-abs" replace />
-          ) : (
-            <Suspense fallback={null}>
-              <Reader />
-            </Suspense>
-          )
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          !me ? (
-            <Navigate to="/login" replace />
-          ) : (
-            <Settings me={me} onChanged={refresh} onSignedOut={() => setMe(null)} />
-          )
-        }
-      />
-      <Route
         path="/*"
         element={
           !me ? (
@@ -81,7 +51,7 @@ export default function App() {
           ) : !me.absLinked ? (
             <Navigate to="/link-abs" replace />
           ) : (
-            <Shell />
+            <Shell me={me} onChanged={refresh} onSignedOut={() => setMe(null)} />
           )
         }
       >
@@ -91,6 +61,16 @@ export default function App() {
         <Route path="authors" element={<Authors />} />
         <Route path="authors/:name" element={<AuthorDetail />} />
         <Route path="book/:itemId" element={<BookDetail />} />
+        <Route path="play/:itemId" element={<Player />} />
+        <Route
+          path="read/:itemId"
+          element={
+            <Suspense fallback={null}>
+              <Reader />
+            </Suspense>
+          }
+        />
+        <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
   );

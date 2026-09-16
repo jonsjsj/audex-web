@@ -68,6 +68,8 @@ export interface BookDetail extends Book {
 export interface BookGroup {
   name: string;
   books: Book[];
+  id?: string | null; // ABS author id, when known — series groups don't have one
+  imageUrl?: string | null; // author headshot proxy URL, or null if ABS has none on file
 }
 
 export interface PlayTrack {

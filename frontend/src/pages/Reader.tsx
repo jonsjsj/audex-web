@@ -336,13 +336,22 @@ export default function Reader() {
             <button className="reader-readalong-jump" onClick={jumpToAudio}>
               Jump to audio ↦
             </button>
-          ) : readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
-            <span className="reader-readalong-status">Building word sync…</span>
           ) : (
-            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
-              Build read-along
+            // No read-along map yet (or none configured) — a plain format
+            // switch shouldn't have to wait on that; it just opens the
+            // player at wherever your own listening position last was.
+            <button className="reader-readalong-jump" onClick={() => navigate(`/play/${itemId}`)}>
+              Listen to this book ↦
             </button>
           )}
+          {!readAlong.map &&
+            (readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+              <span className="reader-readalong-status">Building word sync…</span>
+            ) : (
+              <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
+                Build read-along
+              </button>
+            ))}
           {readAlong.error && <span className="reader-readalong-status">{readAlong.error}</span>}
         </div>
       )}
