@@ -67,3 +67,8 @@ get/save) today. See the plan (§4) for the full surface as the read-along phase
 See [`docs/SYNC_API.md`](docs/SYNC_API.md) for how this all actually talks to
 Audiobookshelf, Codex, and the audex-align read-along service — the canonical
 reference, kept identical across the codex, codexaudio, and audex-web repos.
+
+`/api/report` (Settings → "Report a problem" + automatic crash capture) and
+`/api/admin/update` (self-update) round out the surface. See
+[`docs/ERROR_REPORTING.md`](docs/ERROR_REPORTING.md) for the anonymous
+reporting standard — same cross-repo-canonical treatment as SYNC_API.md.
