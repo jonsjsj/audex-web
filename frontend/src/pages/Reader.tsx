@@ -38,6 +38,7 @@ export default function Reader() {
 
   const [title, setTitle] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [reportSent, setReportSent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fontSizeIdx, setFontSizeIdx] = useState(1); // index into FONT_SIZES, 100% default
   const [progressPct, setProgressPct] = useState<number | null>(null);
@@ -279,6 +280,16 @@ export default function Reader() {
         <div className="error" style={{ margin: "2rem" }}>{error}</div>
         <button className="btn btn-secondary" style={{ width: "auto", margin: "0 2rem" }} onClick={() => navigate("/")}>
           Back to library
+        </button>
+        <button
+          className="player-report-link"
+          onClick={() => {
+            setReportSent(true);
+            api.submitReport({ message: error, itemId, url: window.location.pathname }).catch(() => {});
+          }}
+          disabled={reportSent}
+        >
+          {reportSent ? "Reported — thanks" : "Report this problem"}
         </button>
       </div>
     );

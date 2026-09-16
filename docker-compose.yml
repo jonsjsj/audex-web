@@ -29,6 +29,10 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:////data/audexweb.db
       - UPDATE_IMAGE=${UPDATE_IMAGE:-ghcr.io/jonsjsj/audex-web:latest}
       - UPDATE_CONTAINER_NAME=${UPDATE_CONTAINER_NAME:-audex-web}
+      # Settings → "Report a problem" + automatic crash capture, filed as
+      # GitHub issues (see backend/app/api/report.py) — blank disables it.
+      - REPORT_GITHUB_TOKEN=${REPORT_GITHUB_TOKEN:-}
+      - REPORT_GITHUB_REPO=${REPORT_GITHUB_REPO:-jonsjsj/audex-web}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status == 200 else 1)"]
       interval: 30s

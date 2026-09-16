@@ -218,6 +218,13 @@ export const api = {
 
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
+
+  reportAvailable: () => request<{ available: boolean }>("/api/report/available"),
+  submitReport: (body: { message: string; note?: string; itemId?: string; stack?: string; url?: string; automatic?: boolean }) =>
+    request<{ ok: true; deduped?: boolean; issueUrl?: string; code?: string }>("/api/report", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };
 
 export { ApiError };

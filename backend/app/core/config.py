@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     UPDATE_IMAGE: str = "ghcr.io/jonsjsj/audex-web:latest"
     UPDATE_CONTAINER_NAME: str = "audex-web"
 
+    # ── Problem reports (Settings → "Report a problem", + automatic crash
+    # capture) — filed as GitHub issues. No personal data leaves this
+    # server: see api/report.py's anon_code() — a book is identified only by
+    # a one-way 10-digit hash of its ABS item id, keyed by SECRET_KEY.
+    REPORT_GITHUB_TOKEN: str = ""  # a PAT with `repo` scope on REPORT_GITHUB_REPO; blank disables reporting
+    REPORT_GITHUB_REPO: str = "jonsjsj/audex-web"
+
 
 settings = Settings()
 

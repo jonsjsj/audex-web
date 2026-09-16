@@ -64,6 +64,7 @@ export default function Player() {
   const [book, setBook] = useState<BookDetail | null>(null);
   const [session, setSession] = useState<PlaySession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reportSent, setReportSent] = useState(false);
 
   const [trackIndex, setTrackIndex] = useState(0);
   const [positionS, setPositionS] = useState(0);
@@ -469,6 +470,16 @@ export default function Player() {
         <div className="error" style={{ margin: "2rem" }}>{error}</div>
         <button className="btn btn-secondary" style={{ width: "auto", margin: "0 2rem" }} onClick={() => navigate("/")}>
           Back to library
+        </button>
+        <button
+          className="player-report-link"
+          onClick={() => {
+            setReportSent(true);
+            api.submitReport({ message: error, itemId, url: window.location.pathname }).catch(() => {});
+          }}
+          disabled={reportSent}
+        >
+          {reportSent ? "Reported — thanks" : "Report this problem"}
         </button>
       </div>
     );

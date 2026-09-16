@@ -14,11 +14,39 @@ export default function Settings() {
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [reportAvailable, setReportAvailable] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportNote, setReportNote] = useState("");
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportResult, setReportResult] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
     api.health().then((h) => setVersion(h.version)).catch(() => {});
     api.updateAvailable().then((r) => setUpdateAvailable(r.available)).catch(() => {});
+    api.reportAvailable().then((r) => setReportAvailable(r.available)).catch(() => {});
   }, []);
+
+  async function submitReport() {
+    if (!reportNote.trim() || reportBusy) return;
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      await api.submitReport({
+        message: "User-submitted report from Settings",
+        note: reportNote.trim(),
+        url: window.location.pathname,
+        automatic: false,
+      });
+      setReportResult("Sent — thanks. It's filed as a GitHub issue, no personal data included.");
+      setReportNote("");
+      setReportOpen(false);
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : "Couldn't send the report.");
+    } finally {
+      setReportBusy(false);
+    }
+  }
 
   // Rebuilds itself from the freshly-pulled GHCR image (see
   // backend/app/api/admin.py) — this page WILL go offline for a few seconds
@@ -149,6 +177,47 @@ export default function Settings() {
         {updateMessage && <p className="settings-help">{updateMessage}</p>}
         {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
       </section>
+
+      {reportAvailable && (
+        <section className="settings-section">
+          <h2 className="settings-section-title">Report a problem</h2>
+          <p className="settings-help">
+            Send a note about something that's wrong or looks off. It's filed as a GitHub issue — no book title,
+            author, or account info goes with it; anything book-related is replaced with a one-way code before it
+            ever leaves this server, so a repeated report about the same book can still be noticed without anyone
+            being able to tell what book it is.
+          </p>
+          <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setReportOpen(true)}>
+            Report a problem
+          </button>
+          {reportResult && <p className="settings-help" style={{ color: "var(--accent)" }}>{reportResult}</p>}
+        </section>
+      )}
+
+      {reportOpen && (
+        <div className="player-dialog-backdrop" onClick={() => setReportOpen(false)}>
+          <div className="player-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Report a problem</h3>
+            <textarea
+              className="settings-input"
+              style={{ minHeight: "6rem", resize: "vertical" }}
+              placeholder="What happened?"
+              value={reportNote}
+              onChange={(e) => setReportNote(e.target.value)}
+              autoFocus
+            />
+            {reportError && <div className="error" style={{ marginTop: "0.6rem" }}>{reportError}</div>}
+            <div className="player-dialog-actions">
+              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setReportOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={submitReport} disabled={reportBusy || !reportNote.trim()}>
+                {reportBusy ? "Sending…" : "Send"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

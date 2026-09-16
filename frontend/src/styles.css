@@ -1127,6 +1127,23 @@ input:focus {
   opacity: 0.5;
   cursor: default;
 }
+.player-report-link {
+  display: block;
+  width: auto;
+  margin: 0.8rem 2rem 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.player-report-link:disabled {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: default;
+}
 
 /* ── Reader ───────────────────────────────────────────────────────────── */
 .reader-wrap {
@@ -1351,6 +1368,9 @@ input:focus {
 }
 .settings-input {
   flex: 1;
+  width: 100%; /* used both inside a flex row (Codex token form) and standalone
+    in a dialog (Go To / Add bookmark / Report a problem) — flex:1 alone only
+    sizes it in the first case, this covers the second. */
   padding: 0.55rem 0.8rem;
   border-radius: 8px;
   border: 1px solid var(--line);
