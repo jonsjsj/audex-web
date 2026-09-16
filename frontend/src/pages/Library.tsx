@@ -82,7 +82,7 @@ export default function Library() {
   const [books, setBooks] = useState<Book[] | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("title");
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filter, setFilter] = useState<FilterKey>("both");
   const [error, setError] = useState<string | null>(null);
   const [alignMap, setAlignMap] = useState<Record<string, boolean>>({});
 

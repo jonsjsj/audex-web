@@ -7,6 +7,23 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.3.1] - 2026-09-16
+
+### Fixed
+- **The Reader crashed on every book open** ("Cannot read properties of
+  undefined (reading 'locations')"). The `positionChanged` listener reads a
+  `nav` closure variable that isn't assigned until `new EpubNavigator(...)`
+  returns — if the navigator fires that event synchronously during its own
+  construction (which it does), `nav` was still `null` and the event's own
+  `locator` argument can also be undefined on that first firing, so the
+  fallback chain landed on `undefined` and the very next line dereferenced
+  `.locations` on it. All four `.locations` access points in Reader.tsx are
+  now guarded.
+
+### Changed
+- The library format filter now defaults to **"Audio + ebook"** instead of
+  "All formats".
+
 ## [0.3.0] - 2026-09-16
 
 ### Added

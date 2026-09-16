@@ -22,8 +22,8 @@ const SAVE_DEBOUNCE_MS = 2000;
 function nearestLocatorForProgression(positions: Locator[], p: number): Locator | undefined {
   if (positions.length === 0) return undefined;
   return positions.reduce((best, loc) => {
-    const bestP = best.locations.totalProgression ?? 0;
-    const locP = loc.locations.totalProgression ?? 0;
+    const bestP = best.locations?.totalProgression ?? 0;
+    const locP = loc.locations?.totalProgression ?? 0;
     return Math.abs(locP - p) < Math.abs(bestP - p) ? loc : best;
   });
 }
@@ -128,7 +128,15 @@ export default function Reader() {
         const listeners: EpubNavigatorListeners = {
           frameLoaded: () => {},
           positionChanged: (locator) => {
+            // `nav` (the closure variable, not navRef) isn't assigned until
+            // the `new EpubNavigator(...)` call below RETURNS — if this
+            // fires synchronously during construction, nav is still null
+            // AND the locator parameter itself can be undefined on that
+            // first event. Without this guard that was a hard crash
+            // ("Cannot read properties of undefined (reading 'locations')")
+            // on every book open.
             const loc = nav?.currentLocator ?? locator;
+            if (!loc?.locations) return;
             progressionRef.current = loc.locations.totalProgression ?? 0;
             setProgressPct(
               loc.locations.totalProgression != null ? Math.round(loc.locations.totalProgression * 100) : null,
@@ -222,7 +230,7 @@ export default function Reader() {
     const locator = pendingLocatorRef.current;
     if (!locator) return;
     pendingLocatorRef.current = null;
-    const progress = locator.locations.totalProgression ?? 0;
+    const progress = locator.locations?.totalProgression ?? 0;
     api.saveReadPosition(id, { locator: locator.serialize(), progress }).catch(() => {});
   }
 
