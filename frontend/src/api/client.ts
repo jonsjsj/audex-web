@@ -47,6 +47,9 @@ export interface Book {
   progress: number; // 0..1, furthest of audio/ebook progress
   isFinished: boolean;
   lastUpdate: number | null; // epoch ms, null if never opened
+  audioProgress: number; // 0..1, raw ABS audio progress (currentTime/duration)
+  ebookProgress: number; // 0..1, raw ABS ebook progress
+  audioTimeS: number; // raw ABS audio position, for mapping into ebook progression
 }
 
 export interface BookDetail extends Book {

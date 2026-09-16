@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { HttpFetcher, Locator, Manifest, Publication } from "@readium/shared";
 import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
-import { api } from "../api/client";
+import { api, BookDetail } from "../api/client";
 import { useReadAlong } from "../lib/useReadAlong";
-import { timeAtProgression } from "../lib/syncMap";
+import { progressionAt, timeAtProgression } from "../lib/syncMap";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -14,6 +14,19 @@ const RES_BASE = (itemId: string) => `/api/read/${itemId}/res/`;
 
 const FONT_SIZES = [87.5, 100, 112.5, 125, 137.5, 150, 175, 200]; // percent, Readium's own default preset steps
 const SAVE_DEBOUNCE_MS = 2000;
+
+/** The position-list entry closest to progression [p] — there's no direct
+ *  "Locator from progression" constructor in @readium/shared, so both the
+ *  ?atProgression= jump and the auto-resume-from-audio effect below pick the
+ *  nearest entry from Readium's own fixed-size position list instead. */
+function nearestLocatorForProgression(positions: Locator[], p: number): Locator | undefined {
+  if (positions.length === 0) return undefined;
+  return positions.reduce((best, loc) => {
+    const bestP = best.locations.totalProgression ?? 0;
+    const locP = loc.locations.totalProgression ?? 0;
+    return Math.abs(locP - p) < Math.abs(bestP - p) ? loc : best;
+  });
+}
 
 export default function Reader() {
   const { itemId } = useParams<{ itemId: string }>();
@@ -29,10 +42,21 @@ export default function Reader() {
   const [fontSizeIdx, setFontSizeIdx] = useState(1); // index into FONT_SIZES, 100% default
   const [progressPct, setProgressPct] = useState<number | null>(null);
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
-  const [hasAudio, setHasAudio] = useState(false);
+  const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const hasAudio = (bookDetail?.numAudioFiles ?? 0) > 0;
   // Mirrors progressPct as a raw 0..1 fraction — progressPct is rounded for
   // display, too coarse to feed back into progressionAt/timeAtProgression.
   const progressionRef = useRef(0);
+  // Readium's fixed-size position list from this load — stashed for the
+  // auto-resume effect below, which runs later (once the map arrives) and
+  // needs the same list the initial ?atProgression= handling used.
+  const positionsRef = useRef<Locator[]>([]);
+  // Set when the load effect applies an explicit ?atProgression= jump (from
+  // the Player's "Jump to text") — the auto-resume effect must not then ALSO
+  // override the position from listening progress, fighting that jump.
+  const explicitProgressionRef = useRef(false);
+  const autoResumedRef = useRef(false);
 
   // Cross-format jump (docs/SYNC_API.md §3) — gated on this item also having
   // audio, same reasoning as Player.tsx's own gate on hasEbook.
@@ -52,7 +76,7 @@ export default function Reader() {
           api.item(itemId!).catch(() => null),
         ]);
         if (cancelled) return;
-        if (detail) setHasAudio(detail.numAudioFiles > 0);
+        if (detail) setBookDetail(detail);
 
         // A LOCAL var, not the fontSizeIdx STATE — this effect only runs once
         // per itemId (mount), so the closure below would otherwise always
@@ -75,22 +99,17 @@ export default function Reader() {
         setTitle(pub.metadata.title.getTranslation());
 
         const positions = await pub.positionsFromManifest();
+        positionsRef.current = positions;
 
         // A read-along "jump to text" link (Player.tsx) arrives as
         // ?atProgression=<0..1> — it overrides the saved position for this
-        // one load. There's no direct "Locator from progression" constructor,
-        // so pick the nearest entry from Readium's own fixed-size position
-        // list (the same list EpubNavigator uses internally for percent-based
-        // navigation).
+        // one load.
         const atProgressionParam = searchParams.get("atProgression");
         const atProgression = atProgressionParam !== null ? Number(atProgressionParam) : null;
         let initialLocator: Locator | undefined;
         if (atProgression !== null && Number.isFinite(atProgression) && positions.length > 0) {
-          initialLocator = positions.reduce((best, loc) => {
-            const bestP = best.locations.totalProgression ?? 0;
-            const locP = loc.locations.totalProgression ?? 0;
-            return Math.abs(locP - atProgression) < Math.abs(bestP - atProgression) ? loc : best;
-          });
+          explicitProgressionRef.current = true;
+          initialLocator = nearestLocatorForProgression(positions, atProgression);
           // Consume the param so a refresh resumes from the real saved
           // position instead of re-jumping back here every time.
           setSearchParams(
@@ -169,6 +188,24 @@ export default function Reader() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId]);
+
+  // ── Auto-resume from listening, if you've listened further than you've read ──
+  // The reader-side half of the same carryover as Player.tsx's own effect —
+  // see the comment there for the "furthest wins" reasoning. Runs once
+  // bookDetail + map + the navigator are all ready.
+  useEffect(() => {
+    if (autoResumedRef.current || explicitProgressionRef.current) return;
+    if (!bookDetail || !readAlong.map || !navRef.current || positionsRef.current.length === 0) return;
+    autoResumedRef.current = true; // decide now, whichever way — never re-run
+    if (bookDetail.numAudioFiles === 0 || bookDetail.audioProgress <= bookDetail.ebookProgress) return;
+    const targetP = progressionAt(readAlong.map, bookDetail.audioTimeS);
+    if (targetP === null || targetP - progressionRef.current <= 0.01) return; // not meaningfully ahead
+    const target = nearestLocatorForProgression(positionsRef.current, targetP);
+    if (!target) return;
+    navRef.current.go(target, true, () => {});
+    setResumeNotice("Resumed from your listening progress");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readAlong.map, bookDetail]);
 
   // Debounced, not on every positionChanged — a fast page-turner would
   // otherwise fire a PATCH per page. Coalesces to the LATEST locator only:
@@ -290,6 +327,8 @@ export default function Reader() {
           <span className="reader-progress-pct">{progressPct}%</span>
         </div>
       )}
+
+      {resumeNotice && <p className="reader-resume-notice">{resumeNotice}</p>}
 
       {hasAudio && (
         <div className="reader-readalong">

@@ -474,6 +474,14 @@ input:focus {
   color: var(--muted);
 }
 
+.player-resume-notice {
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  color: var(--accent);
+  margin: -0.4rem 0 0.6rem;
+}
+
 .player-readalong {
   display: flex;
   flex-direction: column;
@@ -710,6 +718,15 @@ input:focus {
   font-size: 0.7rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.reader-resume-notice {
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  color: var(--accent);
+  padding: 0.3rem 1rem 0;
+  flex: none;
 }
 
 .reader-readalong {

@@ -49,6 +49,13 @@ def _book_summary(item: dict, progress: dict | None = None) -> dict:
         "progress": pct,
         "isFinished": bool(p.get("isFinished")),
         "lastUpdate": p.get("lastUpdate"),  # epoch ms, or None if never opened — for sorting "Continue"
+        # The two RAW per-medium fractions (not just the merged `progress` above)
+        # — Player/Reader use these to work out which medium is further along and
+        # auto-resume the OTHER one there via the read-along sync map, the same
+        # "furthest wins" idea this file already applies for the library card.
+        "audioProgress": float(p.get("progress") or 0),
+        "ebookProgress": float(p.get("ebookProgress") or 0),
+        "audioTimeS": float(p.get("currentTime") or 0),
     }
 
 

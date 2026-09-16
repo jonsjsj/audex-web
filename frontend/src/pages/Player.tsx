@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 import { useReadAlong } from "../lib/useReadAlong";
-import { progressionAt } from "../lib/syncMap";
+import { progressionAt, timeAtProgression } from "../lib/syncMap";
 
 const SKIP_S = 30;
 const SYNC_INTERVAL_MS = 15_000;
@@ -59,10 +59,21 @@ export default function Player() {
   const [scrubbing, setScrubbing] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [addingBookmark, setAddingBookmark] = useState(false);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
 
   // Cross-format jump (docs/SYNC_API.md §3) — only worth polling/building for
   // a book that could ever have both an audio and an ebook edition.
   const readAlong = useReadAlong(itemId, book?.hasEbook ?? false);
+  // Set when the load effect below applies an explicit ?atTime= jump (from the
+  // Reader's "Jump to audio") — the auto-resume effect further down must not
+  // then ALSO override the position from reading progress, fighting the jump
+  // the user just asked for.
+  const explicitJumpRef = useRef(false);
+  // Guards the auto-resume effect to run at most once per book load — it
+  // reacts to readAlong.map arriving, which happens once; without this guard
+  // a map re-fetch (there isn't one today, but this is cheap insurance) could
+  // seek the user right back after they've since moved on themselves.
+  const autoResumedRef = useRef(false);
 
   // Mutable session bookkeeping that effects need without re-subscribing.
   const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0 });
@@ -109,6 +120,7 @@ export default function Player() {
         setPositionS(resumeS);
         stateRef.current.lastSyncPos = resumeS;
         if (atTimeS !== null) {
+          explicitJumpRef.current = true;
           // Consume the param so a refresh resumes normally instead of
           // re-jumping back to this same spot every time.
           setSearchParams((prev) => {
@@ -216,6 +228,25 @@ export default function Player() {
   useEffect(() => {
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
   }, [isPlaying]);
+
+  // ── Auto-resume from reading, if you've read further than you've listened ──
+  // Mirrors the mobile app's cross-format carryover: the library grid already
+  // shows "furthest of audio/ebook progress" as ONE bar (library.py's
+  // _book_summary); this makes that same "furthest wins" idea actually MOVE
+  // the resume point, not just describe it. Runs once map+book+session are
+  // all available — map arrival is the natural trigger since it's normally
+  // the last of the three to load.
+  useEffect(() => {
+    if (autoResumedRef.current || explicitJumpRef.current) return;
+    if (!book || !session || !readAlong.map) return;
+    autoResumedRef.current = true; // decide now, whichever way — never re-run
+    if (!book.hasEbook || book.ebookProgress <= book.audioProgress) return;
+    const mappedS = timeAtProgression(readAlong.map, book.ebookProgress);
+    if (mappedS === null || mappedS - positionRef.current <= 20) return; // not meaningfully ahead
+    seekTo(mappedS);
+    setResumeNotice(`Resumed from your reading progress — ${formatTime(mappedS)}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readAlong.map, book, session]);
 
   function seekTo(targetS: number) {
     if (!session) return;
@@ -393,6 +424,7 @@ export default function Player() {
       {book.author && <p className="player-author">{book.author}</p>}
 
       {currentChapter && <p className="player-chapter">{currentChapter.title}</p>}
+      {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
 
       <div className="player-scrub">
         <div className="player-scrub-track">
