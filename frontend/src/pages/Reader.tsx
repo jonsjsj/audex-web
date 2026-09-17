@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { HttpFetcher, Locator, Manifest, Publication } from "@readium/shared";
+import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@readium/shared";
 import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
 import { api, BookDetail } from "../api/client";
 import { useReadAlong } from "../lib/useReadAlong";
@@ -99,7 +99,32 @@ export default function Reader() {
         const pub = new Publication({ manifest, fetcher });
         setTitle(pub.metadata.title.getTranslation());
 
-        const positions = await pub.positionsFromManifest();
+        // Our own backend's manifest never advertises a Readium position-list
+        // link (epub.py's build_manifest() doesn't generate one), so
+        // positionsFromManifest() always resolves to []. That's fine as long
+        // as SOMETHING is in `positions` before construction: EpubNavigator's
+        // own load() falls back to `this.currentLocation = this.positions[0]`
+        // when no initial locator was given, and unconditionally dereferences
+        // `.locations` on it right after — an empty array makes that
+        // `undefined.locations`, crashing on the very first open of any book
+        // that has no saved reading position yet. One synthetic locator per
+        // reading-order item (chapter-start granularity, not real pagination)
+        // is enough to keep the navigator's own fallback from ever landing on
+        // undefined, and gives ?atProgression=/auto-resume something to
+        // target too.
+        let positions = await pub.positionsFromManifest();
+        if (positions.length === 0) {
+          const items = pub.readingOrder.items;
+          positions = items.map(
+            (item, i) =>
+              new Locator({
+                href: item.href,
+                type: item.type ?? "application/xhtml+xml",
+                title: item.title,
+                locations: new LocatorLocations({ position: i + 1, progression: 0, totalProgression: i / items.length }),
+              }),
+          );
+        }
         positionsRef.current = positions;
 
         // A read-along "jump to text" link (Player.tsx) arrives as
