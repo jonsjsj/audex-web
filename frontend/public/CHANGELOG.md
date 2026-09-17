@@ -7,6 +7,25 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.0] - 2026-09-17
+
+### Added
+- **Connect multiple Audiobookshelf servers.** Settings → "Audiobookshelf
+  servers" adds any number of servers beyond the deploy-configured one, each
+  with its own sign-in; the Library, Series, Authors and Narrators views then
+  combine every server into one catalog (the "All libraries" default), the way
+  the mobile app syncs every enabled server. The library picker can still
+  narrow to a single server's library. Item/library ids from extra servers are
+  namespaced internally so nothing collides; the primary server's ids and
+  behaviour are unchanged.
+- **Settings About panel**: the running build's release date ("last updated")
+  next to its version, this version's notes, the next release's name + notes
+  when an update is available, and an "Expand to full changelog" view.
+
+### Changed
+- **Codex sync** no longer leads with a paragraph — the default view is just a
+  "Connected" status, with the explanation behind an ⓘ toggle.
+
 ## [0.3.2] - 2026-09-17
 
 ### Fixed

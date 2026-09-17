@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, UpdateCheck } from "../api/client";
+import { AbsServerInfo, api, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
 
 interface ChangelogEntry {
@@ -29,7 +29,12 @@ function parseChangelog(md: string): ChangelogEntry[] {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { me, onChanged, onSignedOut } = useShell();
+  const { me, onChanged, onSignedOut, refreshLibraries } = useShell();
+  const [servers, setServers] = useState<AbsServerInfo[] | null>(null);
+  const [addServerOpen, setAddServerOpen] = useState(false);
+  const [serverForm, setServerForm] = useState({ url: "", username: "", password: "", name: "" });
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
@@ -52,6 +57,7 @@ export default function Settings() {
   useEffect(() => {
     api.updateAvailable().then((r) => setUpdateCapable(r.available)).catch(() => {});
     api.reportAvailable().then((r) => setReportAvailable(r.available)).catch(() => {});
+    api.absServers().then(setServers).catch(() => {});
     // The shipped changelog — powers the "last updated" date, this build's
     // notes, and the expand-to-full view. Best-effort: a failed fetch just
     // hides those extras, the version number still shows.
@@ -106,6 +112,39 @@ export default function Settings() {
     }
   }
 
+  async function addServer() {
+    if (serverBusy || !serverForm.url.trim() || !serverForm.username.trim() || !serverForm.password) return;
+    setServerBusy(true);
+    setServerError(null);
+    try {
+      await api.addAbsServer({
+        url: serverForm.url.trim(),
+        username: serverForm.username.trim(),
+        password: serverForm.password,
+        name: serverForm.name.trim() || undefined,
+      });
+      setServerForm({ url: "", username: "", password: "", name: "" });
+      setAddServerOpen(false);
+      setServers(await api.absServers().catch(() => servers));
+      refreshLibraries(); // so the new server's libraries show in the picker right away
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : "Couldn't connect that server.");
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function removeServer(key: string) {
+    setServerBusy(true);
+    try {
+      await api.removeAbsServer(key);
+      setServers(await api.absServers().catch(() => servers));
+      refreshLibraries();
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
   async function linkCodex() {
     if (!codexToken.trim()) return;
     setCodexBusy(true);
@@ -154,16 +193,97 @@ export default function Settings() {
           </div>
           <span className={`tag ${me.ssoLinked ? "ok" : ""}`}>{me.ssoLinked ? "SSO" : "Local sign-in"}</span>
         </div>
-        <div className="settings-row">
-          <div>
-            <div className="settings-row-label">Audiobookshelf</div>
-            <div className="settings-row-sub">{me.absUsername}</div>
-          </div>
-          <span className="tag ok">Connected</span>
-        </div>
         <button className="btn btn-secondary" style={{ width: "auto", marginTop: "0.8rem" }} onClick={signOut}>
           Sign out
         </button>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-head">
+          <h2 className="settings-section-title">Audiobookshelf servers</h2>
+        </div>
+        <p className="settings-help">
+          Connect more than one Audiobookshelf server to see every library in one place — the Library, Series,
+          Authors and Narrators views combine them, and each server keeps its own sign-in.
+        </p>
+        {(servers ?? []).map((s) => (
+          <div className="settings-row" key={s.key || "primary"}>
+            <div>
+              <div className="settings-row-label">{s.name}</div>
+              <div className="settings-row-sub">
+                {s.url}
+                {s.username ? ` · ${s.username}` : ""}
+              </div>
+            </div>
+            {s.primary ? (
+              <span className="tag ok">Primary</span>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                style={{ width: "auto" }}
+                onClick={() => removeServer(s.key)}
+                disabled={serverBusy}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        ))}
+        {addServerOpen ? (
+          <div className="settings-server-form">
+            <input
+              className="settings-input"
+              placeholder="Server URL (https://abs.example.com)"
+              value={serverForm.url}
+              onChange={(e) => setServerForm((f) => ({ ...f, url: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              placeholder="Name (optional)"
+              value={serverForm.name}
+              onChange={(e) => setServerForm((f) => ({ ...f, name: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              placeholder="Username"
+              value={serverForm.username}
+              onChange={(e) => setServerForm((f) => ({ ...f, username: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Password"
+              value={serverForm.password}
+              onChange={(e) => setServerForm((f) => ({ ...f, password: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && addServer()}
+            />
+            {serverError && <div className="error">{serverError}</div>}
+            <div className="player-dialog-actions">
+              <button
+                className="btn btn-secondary"
+                style={{ width: "auto" }}
+                onClick={() => {
+                  setAddServerOpen(false);
+                  setServerError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ width: "auto" }}
+                onClick={addServer}
+                disabled={serverBusy || !serverForm.url.trim() || !serverForm.username.trim() || !serverForm.password}
+              >
+                {serverBusy ? "Connecting…" : "Connect server"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn btn-secondary" style={{ width: "auto", marginTop: "0.4rem" }} onClick={() => setAddServerOpen(true)}>
+            Add a server
+          </button>
+        )}
       </section>
 
       <section className="settings-section">

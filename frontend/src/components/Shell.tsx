@@ -21,6 +21,9 @@ export interface ShellContext {
   // Bumped when the brand is clicked ("back to start") so pages can reset
   // their own local view state (Library's sort/filter) to defaults.
   resetSignal: number;
+  // Re-fetch the library list — Settings calls this after adding/removing an
+  // Audiobookshelf server so the picker reflects it without a page reload.
+  refreshLibraries: () => void;
 }
 
 // The top-level browse pages that share the persistent search bar. Detail
@@ -41,15 +44,26 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const [search, setSearch] = useState("");
   const [resetSignal, setResetSignal] = useState(0);
 
-  useEffect(() => {
+  const loadLibraries = () => {
     api
       .libraries()
       .then((libs) => {
         setLibraries(libs);
-        if (libs.length === 0) setError("No book libraries found on this Audiobookshelf server.");
+        setError(libs.length === 0 ? "No book libraries found on your Audiobookshelf server(s)." : null);
+        // A removed server's library could still be selected — fall back to
+        // the combined view rather than fetching a library that's gone.
+        setLibraryId((cur) => (cur === ALL_LIBRARIES || libs.some((l) => l.id === cur) ? cur : ALL_LIBRARIES));
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load your libraries."));
+  };
+
+  useEffect(() => {
+    loadLibraries();
   }, []);
+
+  // More than one distinct server contributing libraries → disambiguate the
+  // picker options by server name.
+  const multiServer = new Set((libraries ?? []).map((l) => l.serverKey ?? "")).size > 1;
 
   // "Back to start": home, cleared search, all libraries, and a reset signal
   // for each page's own view state (Library's sort/filter defaults).
@@ -61,7 +75,10 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
     navigate("/");
   }
 
-  const ctx: ShellContext = { libraries, libraryId, error, me, onChanged, onSignedOut, search, setSearch, resetSignal };
+  const ctx: ShellContext = {
+    libraries, libraryId, error, me, onChanged, onSignedOut, search, setSearch, resetSignal,
+    refreshLibraries: loadLibraries,
+  };
   const showSearch = SEARCHABLE_PATHS.has(location.pathname);
 
   return (
@@ -84,7 +101,7 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
             <option value={ALL_LIBRARIES}>All libraries</option>
             {libraries.map((l) => (
               <option key={l.id} value={l.id}>
-                {l.name}
+                {multiServer && l.serverName ? `${l.serverName} · ${l.name}` : l.name}
               </option>
             ))}
           </select>
