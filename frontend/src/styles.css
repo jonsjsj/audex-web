@@ -780,6 +780,110 @@ input:focus {
   font-size: 0.85rem;
 }
 
+/* ── Mini player (persists across navigation, bottom-right) ─────────────── */
+.mini-player {
+  position: fixed;
+  right: 1.2rem;
+  bottom: 1.2rem;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  width: min(22rem, calc(100vw - 2.4rem));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.mini-player-body {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0.55rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+}
+.mini-player-cover {
+  flex: none;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.mini-player-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mini-player-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-player-author {
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-player-play,
+.mini-player-close {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.mini-player-play {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #201400;
+  font-size: 0.85rem;
+  margin-right: 0.3rem;
+}
+.mini-player-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-right: 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted);
+}
+.mini-player-close:hover {
+  color: var(--danger);
+}
+.mini-player-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--line);
+}
+.mini-player-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+@media (max-width: 30rem) {
+  .mini-player {
+    left: 1rem;
+    right: 1rem;
+    width: auto;
+    bottom: 0.8rem;
+  }
+}
+
 /* ── Player ───────────────────────────────────────────────────────────── */
 /* Mirrors the native Audex app's own player screen: a full-bleed cover hero
    with a scrim the title sits on, a scrubber + decorative waveform, a big
@@ -845,10 +949,26 @@ input:focus {
   margin: 0 0 0.2rem;
   text-wrap: balance;
 }
-.player-author {
+.player-byline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.6rem;
+}
+.player-byline-link {
+  background: none;
+  border: none;
+  padding: 0;
   color: var(--ink-soft);
+  font-family: var(--sans);
   font-size: 0.92rem;
-  margin: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+}
+.player-byline-link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
 }
 
 .player-progress-section {

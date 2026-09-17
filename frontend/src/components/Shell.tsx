@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useOutletContext } from "react-router-dom";
 import { api, Library as LibraryModel, Me } from "../api/client";
+import MiniPlayer from "./MiniPlayer";
 
 export interface ShellContext {
   libraries: LibraryModel[] | null;
@@ -84,6 +85,8 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
             their own, and Settings/Player/Reader don't need libraryId at all. */}
         <Outlet context={ctx} />
       </main>
+
+      <MiniPlayer />
     </div>
   );
 }

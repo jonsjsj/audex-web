@@ -14,6 +14,7 @@ import Player from "./pages/Player";
 import Series from "./pages/Series";
 import SeriesDetail from "./pages/SeriesDetail";
 import Settings from "./pages/Settings";
+import { PlaybackProvider } from "./lib/PlaybackContext";
 
 // @readium/navigator + @readium/shared pull in ~330kB of code (ReadiumCSS
 // presets, the EPUB frame renderer) that Library and Player never touch —
@@ -31,7 +32,8 @@ export default function App() {
   if (me === undefined) return null; // avoid a flash of the login page while checking
 
   return (
-    <Routes>
+    <PlaybackProvider>
+      <Routes>
       <Route path="/login" element={me ? <Navigate to="/" replace /> : <Login />} />
       <Route
         path="/link-abs"
@@ -76,6 +78,7 @@ export default function App() {
         />
         <Route path="settings" element={<Settings />} />
       </Route>
-    </Routes>
+      </Routes>
+    </PlaybackProvider>
   );
 }
