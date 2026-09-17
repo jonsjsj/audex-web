@@ -3,6 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { api, Book } from "../api/client";
 import { useShell } from "../components/Shell";
 
+// A book you own but haven't opened yet — the "unread" shelf. Started-and-
+// unfinished books belong to "In progress", finished ones to neither.
+function isUnread(b: Book): boolean {
+  return b.progress <= 0.001 && !b.isFinished;
+}
+
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
   const h = Math.floor(s / 3600);
@@ -34,13 +40,14 @@ const SORTS: { key: SortKey; label: string }[] = [
 // Mirrors the mobile app's WorkFilter (LibraryViewModel.kt), plus "both" —
 // specifically the books eligible for read-along (needs both formats on one
 // item), which didn't have its own filter before.
-type FilterKey = "all" | "audio" | "ebook" | "both" | "progress";
+type FilterKey = "all" | "audio" | "ebook" | "both" | "progress" | "unread";
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "All formats" },
   { key: "audio", label: "Audiobook" },
   { key: "ebook", label: "Ebook" },
   { key: "both", label: "Audio + ebook" },
   { key: "progress", label: "In progress" },
+  { key: "unread", label: "Unread" },
 ];
 
 function filterBooks(books: Book[], key: FilterKey): Book[] {
@@ -53,6 +60,8 @@ function filterBooks(books: Book[], key: FilterKey): Book[] {
       return books.filter((b) => b.numAudioFiles > 0 && b.hasEbook);
     case "progress":
       return books.filter(isContinuable);
+    case "unread":
+      return books.filter(isUnread);
     case "all":
     default:
       return books;
@@ -78,13 +87,20 @@ function sortBooks(books: Book[], key: SortKey): Book[] {
 
 export default function Library() {
   const navigate = useNavigate();
-  const { libraryId, error: shellError } = useShell();
+  const { libraryId, error: shellError, search, resetSignal } = useShell();
   const [books, setBooks] = useState<Book[] | null>(null);
-  const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("title");
-  const [filter, setFilter] = useState<FilterKey>("both");
+  const [filter, setFilter] = useState<FilterKey>("all");
   const [error, setError] = useState<string | null>(null);
   const [alignMap, setAlignMap] = useState<Record<string, boolean>>({});
+
+  // "Back to start" (brand click) resets the local view controls to defaults;
+  // the search itself is cleared by the shell that owns it.
+  useEffect(() => {
+    if (resetSignal === 0) return; // initial mount — leave the defaults as-is
+    setSort("title");
+    setFilter("all");
+  }, [resetSignal]);
 
   useEffect(() => {
     if (!libraryId) return;
@@ -130,12 +146,6 @@ export default function Library() {
   return (
     <div className="lib">
       <header className="lib-head">
-        <input
-          className="lib-search"
-          placeholder="Search your library…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
         <select className="lib-sort" value={filter} onChange={(e) => setFilter(e.target.value as FilterKey)} aria-label="Filter">
           {FILTERS.map((f) => (
             <option key={f.key} value={f.key}>

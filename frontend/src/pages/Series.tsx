@@ -6,7 +6,7 @@ import GroupBrowser from "../components/GroupBrowser";
 
 export default function Series() {
   const navigate = useNavigate();
-  const { libraryId, error: shellError } = useShell();
+  const { libraryId, error: shellError, search } = useShell();
   const [groups, setGroups] = useState<BookGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,6 +28,7 @@ export default function Series() {
       title="Series"
       groups={groups}
       storageKey="series"
+      search={search}
       onOpen={(name) => navigate(`/series/${encodeURIComponent(name)}`)}
     />
   );

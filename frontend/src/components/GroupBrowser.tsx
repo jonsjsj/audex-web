@@ -1,7 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookGroup } from "../api/client";
 
 type ViewMode = "grid" | "list";
+
+/** Filters groups by the shared search box — matches a group's own name or
+ *  any of its books' title/author, so searching "sanderson" finds the author
+ *  tile and searching a book title finds the series/narrator it belongs to. */
+function matchGroups(groups: BookGroup[], search: string): BookGroup[] {
+  const q = search.trim().toLowerCase();
+  if (!q) return groups;
+  return groups.filter(
+    (g) =>
+      g.name.toLowerCase().includes(q) ||
+      g.books.some(
+        (b) => b.title.toLowerCase().includes(q) || (b.author ?? "").toLowerCase().includes(q),
+      ),
+  );
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -46,15 +61,18 @@ export default function GroupBrowser({
   groups,
   storageKey,
   isPerson = false,
+  search = "",
   onOpen,
 }: {
   title: string;
   groups: BookGroup[];
   storageKey: string; // "series" | "authors" | "narrators" — persists the grid/list choice per page
   isPerson?: boolean; // true for authors/narrators — governs the never-a-book-cover rule above
+  search?: string; // the shell's shared search box
   onOpen: (name: string) => void;
 }) {
   const [view, setView] = useState<ViewMode>("grid");
+  const shown = useMemo(() => matchGroups(groups, search), [groups, search]);
 
   useEffect(() => {
     try {
@@ -88,9 +106,11 @@ export default function GroupBrowser({
         </div>
       </header>
 
-      {view === "grid" ? (
+      {shown.length === 0 ? (
+        <p className="sub" style={{ padding: "0 1.5rem" }}>Nothing matches "{search}".</p>
+      ) : view === "grid" ? (
         <div className="group-grid">
-          {groups.map((g) => (
+          {shown.map((g) => (
             <button key={g.name} className="group-tile" onClick={() => onOpen(g.name)}>
               <div className="group-tile-poster">
                 <TileImage name={g.name} imageUrl={g.imageUrl} coverUrl={g.books[0]?.coverUrl} isPerson={isPerson} />
@@ -104,7 +124,7 @@ export default function GroupBrowser({
         </div>
       ) : (
         <div className="group-list">
-          {groups.map((g) => (
+          {shown.map((g) => (
             <button key={g.name} className="group-list-row" onClick={() => onOpen(g.name)}>
               <div className="group-list-thumb">
                 <TileImage name={g.name} imageUrl={g.imageUrl} coverUrl={g.books[0]?.coverUrl} isPerson={isPerson} />

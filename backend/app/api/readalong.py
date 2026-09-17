@@ -19,7 +19,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.api.deps import get_abs_token
-from app.core import abs_client
+from app.api.library import _gather_items
 from app.core.abs_client import AbsError
 from app.core.config import align_gateway_url, settings
 
@@ -40,12 +40,17 @@ async def bulk_status(library_id: str = Query(..., alias="libraryId"), token: st
     if not _configured():
         return {}
     try:
-        page = await abs_client.library_items(token, library_id)
+        items = await _gather_items(token, library_id)
     except AbsError:
         return {}
+    # Eligibility keys off `ebookFormat` (present in the LIST response), not
+    # `ebookFile` (only on the expanded detail) — the same list-shape reason
+    # the library card's own ebook detection uses it. Keying off ebookFile
+    # here left `eligible` always empty, so no read-along icon ever lit up.
     eligible = [
-        item["id"] for item in page.get("results", [])
-        if (item.get("media") or {}).get("ebookFile") and (item.get("media") or {}).get("numAudioFiles", 0) > 0
+        item["id"] for item in items
+        if ((item.get("media") or {}).get("ebookFormat") or (item.get("media") or {}).get("ebookFile"))
+        and (item.get("media") or {}).get("numAudioFiles", 0) > 0
     ]
     if not eligible:
         return {}

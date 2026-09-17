@@ -45,7 +45,14 @@ def _book_summary(item: dict, progress: dict | None = None) -> dict:
         "series": series,
         "durationS": media.get("duration"),
         "mediaType": item.get("mediaType", "book"),
-        "hasEbook": bool(media.get("ebookFile")),
+        # `ebookFormat` (a string like "epub") is present on BOTH the library
+        # LIST response and the expanded detail; `ebookFile` (the full file
+        # object) only appears on the expanded detail. Keying `hasEbook` off
+        # `ebookFile` alone left every library-card ebook undetected — no
+        # ebook icon, an empty "Audio + ebook" filter, and no Read button.
+        # The mobile app keys this off `ebookFormat` for exactly this reason
+        # (CatalogRepositoryImpl: `hasEbook = !ebookFormat.isNullOrBlank()`).
+        "hasEbook": bool(media.get("ebookFormat")) or bool(media.get("ebookFile")),
         "numAudioFiles": media.get("numAudioFiles", 0),
         "coverUrl": f"/api/library/items/{item['id']}/cover",
         "progress": pct,
@@ -137,9 +144,18 @@ def _author_entries(item: dict) -> list[tuple[str, str | None]]:
 
 def _narrator_names(item: dict) -> list[str]:
     """ABS has no dedicated Narrator entity (no id, no image, no bio API —
-    unlike Author) — just a flat string list on the book's own metadata."""
+    unlike Author) — just a flat string list on the book's own metadata.
+
+    Same list-endpoint-shape caveat as series and authors: the library LIST
+    response often only carries the flat `narratorName` string ("A, B, C"),
+    not the structured `narrators` array (that comes with the expanded
+    single-item endpoint). Missing this fallback was why /narrators came back
+    empty. The mobile app does the same: `narrators.ifEmpty { split(narratorName) }`."""
     meta = (item.get("media") or {}).get("metadata") or {}
-    return [n.strip() for n in (meta.get("narrators") or []) if (n or "").strip()]
+    names = [n.strip() for n in (meta.get("narrators") or []) if (n or "").strip()]
+    if not names and meta.get("narratorName"):
+        names = [n.strip() for n in str(meta["narratorName"]).split(",") if n.strip()]
+    return names
 
 
 @router.get("/libraries")
@@ -153,6 +169,35 @@ async def get_libraries(token: str = Depends(get_abs_token)):
         for lib in libs
         if lib.get("mediaType", "book") == "book"  # podcasts are a separate later phase
     ]
+
+
+async def _book_library_ids(token: str) -> list[str]:
+    """Every book library's id (podcasts excluded, same as /libraries). Used to
+    resolve the "all" pseudo-library into the real set to aggregate over."""
+    libs = await abs_client.libraries(token)
+    return [lib["id"] for lib in libs if lib.get("mediaType", "book") == "book"]
+
+
+async def _gather_items(token: str, library_id: str) -> list[dict]:
+    """The raw ABS items for a request's library selection. `library_id` is
+    either a real library id or the sentinel "all", which combines every book
+    library into one list — the same "one merged catalog across libraries" the
+    mobile app builds (LibrarySyncer walks every enabled server's book
+    libraries). Item ids are globally unique in ABS, so the merge is a plain
+    concatenation. Per-library failures are tolerated when aggregating so one
+    unreachable library doesn't blank the whole combined view; a single
+    explicitly-requested library still surfaces its error."""
+    if library_id and library_id != "all":
+        page = await abs_client.library_items(token, library_id)
+        return page.get("results", [])
+    results: list[dict] = []
+    for lid in await _book_library_ids(token):
+        try:
+            page = await abs_client.library_items(token, lid)
+        except AbsError:
+            continue
+        results.extend(page.get("results", []))
+    return results
 
 
 async def _progress_by_item(token: str) -> dict[str, dict]:
@@ -173,13 +218,14 @@ async def get_items(
 ):
     """One page covers a homelab-scale library; `search` filters title/author/
     series client-side (case-insensitive substring) rather than round-tripping to
-    ABS's own filter query language, which the mobile app doesn't use either."""
+    ABS's own filter query language, which the mobile app doesn't use either.
+    `libraryId` may be "all" to combine every book library into one view."""
     try:
-        page = await abs_client.library_items(token, library_id)
+        items = await _gather_items(token, library_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     progress = await _progress_by_item(token)
-    books = [_book_summary(item, progress.get(item["id"])) for item in page.get("results", [])]
+    books = [_book_summary(item, progress.get(item["id"])) for item in items]
     if search.strip():
         q = search.strip().lower()
         books = [
@@ -218,14 +264,15 @@ async def get_series(library_id: str = Query(..., alias="libraryId"), token: str
     fill-in of volumes you don't own — Codex does that; this just organizes
     what's actually in your ABS library). Books embedded directly rather than
     a separate per-series fetch: a homelab-scale library's whole item list
-    already fits in one call (see library_items()'s own docstring)."""
+    already fits in one call (see library_items()'s own docstring).
+    `libraryId` may be "all" to combine every book library."""
     try:
-        page = await abs_client.library_items(token, library_id)
+        items = await _gather_items(token, library_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     progress = await _progress_by_item(token)
     groups: dict[str, list[tuple[float | None, dict]]] = {}
-    for item in page.get("results", []):
+    for item in items:
         entries = _series_entries(item)
         if not entries:
             continue
@@ -244,14 +291,15 @@ async def get_series(library_id: str = Query(..., alias="libraryId"), token: str
 async def get_authors(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
     """Same idea as /series, grouped by author instead. Carries the ABS
     author id (when known) so the frontend can show a real headshot via
-    /authors/{id}/image instead of a book-cover stand-in."""
+    /authors/{id}/image instead of a book-cover stand-in.
+    `libraryId` may be "all" to combine every book library."""
     try:
-        page = await abs_client.library_items(token, library_id)
+        items = await _gather_items(token, library_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     progress = await _progress_by_item(token)
     groups: dict[str, dict] = {}  # name -> {id, books}
-    for item in page.get("results", []):
+    for item in items:
         entries = _author_entries(item)
         if not entries:
             continue
@@ -277,14 +325,15 @@ async def get_authors(library_id: str = Query(..., alias="libraryId"), token: st
 @router.get("/narrators")
 async def get_narrators(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
     """Same idea as /authors, grouped by narrator instead. No id/imageUrl —
-    ABS has no Narrator entity to look either up from (see _narrator_names)."""
+    ABS has no Narrator entity to look either up from (see _narrator_names).
+    `libraryId` may be "all" to combine every book library."""
     try:
-        page = await abs_client.library_items(token, library_id)
+        items = await _gather_items(token, library_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     progress = await _progress_by_item(token)
     groups: dict[str, list[dict]] = {}
-    for item in page.get("results", []):
+    for item in items:
         names = _narrator_names(item)
         if not names:
             continue

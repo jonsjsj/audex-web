@@ -211,6 +211,31 @@ input:focus {
   font-size: 1.5rem;
   margin: 0;
 }
+/* The brand doubles as a "back to start" button — strip the native button
+   chrome so it still reads as the wordmark, not a control. */
+.shell-brand-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--ink);
+  align-self: flex-start;
+}
+.shell-brand-btn:hover em {
+  filter: brightness(1.12);
+}
+
+/* The persistent search bar (Library/Series/Authors/Narrators) — lives in the
+   shell's main column above each page so it survives navigation between them. */
+.shell-searchbar {
+  display: flex;
+  padding: 1.6rem 1.5rem 0;
+}
+.shell-searchbar .lib-search {
+  width: 100%;
+  flex: 1;
+}
 .shell-select {
   width: 100%;
   padding: 0.5rem 0.7rem;
