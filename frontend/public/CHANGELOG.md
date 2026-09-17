@@ -7,6 +7,59 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.0] - 2026-09-17
+
+### Added
+- **Connect multiple Audiobookshelf servers.** Settings → "Audiobookshelf
+  servers" adds any number of servers beyond the deploy-configured one, each
+  with its own sign-in; the Library, Series, Authors and Narrators views then
+  combine every server into one catalog (the "All libraries" default), the way
+  the mobile app syncs every enabled server. The library picker can still
+  narrow to a single server's library. Item/library ids from extra servers are
+  namespaced internally so nothing collides; the primary server's ids and
+  behaviour are unchanged.
+- **Settings About panel**: the running build's release date ("last updated")
+  next to its version, this version's notes, the next release's name + notes
+  when an update is available, and an "Expand to full changelog" view.
+
+### Changed
+- **Codex sync** no longer leads with a paragraph — the default view is just a
+  "Connected" status, with the explanation behind an ⓘ toggle.
+
+## [0.3.2] - 2026-09-17
+
+### Fixed
+- **The library came up empty.** Two causes, both the same root: `hasEbook` was
+  derived from `media.ebookFile`, which the Audiobookshelf *list* endpoint
+  doesn't include (only the expanded single-item detail does). So every book
+  looked audio-only — the "Audio + ebook" filter (the previous default) matched
+  nothing, ebook icons never lit, and the read-along eligibility scan found
+  nothing. `hasEbook` now keys off `media.ebookFormat`, which is present on the
+  list response too, matching the mobile app's own detection.
+- **Book detail always show both actions.** With ebook detection fixed, a book
+  that has both formats now shows both **Listen** and **Read**, however you
+  opened it (grid card → detail, or the player/reader's own cross-format jump).
+- **Narrators showed "No narrators found."** `/narrators` only read the
+  structured `narrators` array, which the list endpoint can omit in favour of
+  the flat `narratorName` string — the same shape caveat Series and Authors
+  already handled. Added the `narratorName` fallback.
+
+### Added
+- **Multiple libraries, combined.** The library, series, authors and narrators
+  views now default to **All libraries** — one merged catalog across every book
+  library on the server, the way the mobile app syncs. A per-library picker is
+  still there when you have more than one.
+- **A persistent search bar.** Search now lives in the shell above every browse
+  page (Library / Series / Authors / Narrators) and filters each, instead of
+  only existing on the Library page.
+- An **Unread** quick filter (books you own but haven't started).
+- Clicking the **Audex** wordmark returns to the start — Library, All libraries,
+  search cleared, sort/filter back to defaults.
+
+### Changed
+- The library format filter now defaults to **"All formats"** again (see the fix
+  above for why "Audio + ebook" was showing nothing).
+
 ## [0.3.1] - 2026-09-16
 
 ### Fixed

@@ -17,11 +17,14 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_abs_token
+from app.api.connections import connections_for_library, resolve
+from app.api.deps import get_current_identity
 from app.core import abs_client
 from app.core.abs_client import AbsError
 from app.core.config import align_gateway_url, settings
+from app.core.database import Identity, get_db
 
 router = APIRouter(prefix="/api/readalong", tags=["readalong"])
 
@@ -31,22 +34,43 @@ def _configured() -> bool:
 
 
 @router.get("/bulk-status")
-async def bulk_status(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+async def bulk_status(
+    library_id: str = Query(..., alias="libraryId"),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Read-along availability for every book in a library that could ever
     have one (both an audio and an ebook edition on the SAME item) — powers
     the library grid's third icon (docs/SYNC_API.md's "same item" case;
     cross-item pairing isn't attempted, same scope limit as the rest of this
-    phase). Not configured, or no eligible books → {}, not an error."""
+    phase). Not configured, or no eligible books → {}, not an error.
+
+    Only the PRIMARY connection is queried: Codex computes the book-key from
+    its own single ABS connection, so read-along only exists for that server —
+    extra servers' items just stay "not built" (the frontend default)."""
     if not _configured():
         return {}
-    try:
-        page = await abs_client.library_items(token, library_id)
-    except AbsError:
-        return {}
-    eligible = [
-        item["id"] for item in page.get("results", [])
-        if (item.get("media") or {}).get("ebookFile") and (item.get("media") or {}).get("numAudioFiles", 0) > 0
-    ]
+    eligible: list[str] = []
+    for conn, lib_id in await connections_for_library(identity, db, library_id):
+        if not conn.is_primary:
+            continue
+        try:
+            libs = await abs_client.libraries(conn.base_url, conn.token)
+            lib_ids = [lib_id] if lib_id else [
+                lib["id"] for lib in libs if lib.get("mediaType", "book") == "book"
+            ]
+            for lid in lib_ids:
+                page = await abs_client.library_items(conn.base_url, conn.token, lid)
+                # Eligibility keys off `ebookFormat` (present in the LIST
+                # response), not `ebookFile` (only on the expanded detail) —
+                # keying off ebookFile left this always empty.
+                eligible += [
+                    item["id"] for item in page.get("results", [])
+                    if ((item.get("media") or {}).get("ebookFormat") or (item.get("media") or {}).get("ebookFile"))
+                    and (item.get("media") or {}).get("numAudioFiles", 0) > 0
+                ]
+        except AbsError:
+            return {}
     if not eligible:
         return {}
 
@@ -66,16 +90,22 @@ async def bulk_status(library_id: str = Query(..., alias="libraryId"), token: st
         return item_id, False
 
     results = await asyncio.gather(*(_one(i) for i in eligible))
+    # Primary items are bare-tagged, so their abs id IS their frontend id.
     return {item_id: available for item_id, available in results}
 
 
 @router.get("/{item_id}/status")
-async def status(item_id: str, token: str = Depends(get_abs_token)):
+async def status(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     if not _configured():
         return {"configured": False, "available": False, "state": "none", "progress": 0.0, "etaSeconds": None}
+    _conn, abs_id = await resolve(identity, db, item_id)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{align_gateway_url()}/status/{item_id}")
+            r = await client.get(f"{align_gateway_url()}/status/{abs_id}")
     except httpx.HTTPError:
         raise HTTPException(502, "Couldn't reach the read-along service.")
     if r.status_code != 200:
@@ -95,15 +125,22 @@ class BuildBody(BaseModel):
 
 
 @router.post("/{item_id}/build")
-async def build(item_id: str, body: BuildBody, token: str = Depends(get_abs_token)):
+async def build(
+    item_id: str, body: BuildBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     if not _configured():
         raise HTTPException(400, "Read-along isn't configured on this server (no Codex instance set).")
+    _conn, abs_id = await resolve(identity, db, item_id)
     payload: dict = {}
     if body.ebookItemId:
-        payload["ebook_item_id"] = body.ebookItemId
+        # An ebook pair id may itself be namespaced; strip to the real abs id.
+        _c2, ebook_abs = await resolve(identity, db, body.ebookItemId)
+        payload["ebook_item_id"] = ebook_abs
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(f"{align_gateway_url()}/build/{item_id}", json=payload)
+            r = await client.post(f"{align_gateway_url()}/build/{abs_id}", json=payload)
     except httpx.HTTPError:
         raise HTTPException(502, "Couldn't reach the read-along service.")
     if r.status_code != 200:
@@ -116,7 +153,11 @@ async def build(item_id: str, body: BuildBody, token: str = Depends(get_abs_toke
 
 
 @router.get("/{item_id}/map")
-async def get_map(item_id: str, token: str = Depends(get_abs_token)):
+async def get_map(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """The full sync map — see docs/SYNC_API.md §3 for the shape. Passed
     through byte-for-byte (not re-modeled into camelCase like everything
     else here, and not re-serialized through r.json()/a dict return) since
@@ -125,9 +166,10 @@ async def get_map(item_id: str, token: str = Depends(get_abs_token)):
     unlike the small responses every other route here reshapes."""
     if not _configured():
         raise HTTPException(404, "No read-along map for this book.")
+    _conn, abs_id = await resolve(identity, db, item_id)
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(f"{align_gateway_url()}/map/{item_id}")
+            r = await client.get(f"{align_gateway_url()}/map/{abs_id}")
     except httpx.HTTPError:
         raise HTTPException(502, "Couldn't reach the read-along service.")
     if r.status_code != 200:

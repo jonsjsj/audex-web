@@ -10,20 +10,28 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_abs_token, get_codex_token
+from app.api.connections import list_connections, resolve
+from app.api.deps import get_codex_token, get_current_identity
 from app.core import abs_client, codex_client
 from app.core.abs_client import AbsError
 from app.core.config import settings
+from app.core.database import Identity, get_db
 
 router = APIRouter(prefix="/api/play", tags=["play"])
 stream_router = APIRouter(prefix="/api/stream", tags=["play"])
 
 
 @router.post("/{item_id}")
-async def play(item_id: str, token: str = Depends(get_abs_token)):
+async def play(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        session = await abs_client.start_play(token, item_id)
+        session = await abs_client.start_play(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     tracks = session.get("audioTracks", [])
@@ -37,7 +45,9 @@ async def play(item_id: str, token: str = Depends(get_abs_token)):
                 "startOffsetS": t.get("startOffset", 0.0),
                 "durationS": t.get("duration", 0.0),
                 # Opaque to the frontend — just what to hand back to /api/stream.
-                "streamUrl": f"/api/stream?path={quote(t.get('contentUrl', ''), safe='')}",
+                # `server` tags which connection's bytes to proxy (bare "" =
+                # the primary server), since the raw contentUrl doesn't say.
+                "streamUrl": f"/api/stream?path={quote(t.get('contentUrl', ''), safe='')}&server={quote(conn.key, safe='')}",
             }
             for i, t in enumerate(tracks)
         ],
@@ -65,16 +75,21 @@ def _is_finished(body: SyncBody) -> bool:
 @router.post("/{item_id}/sync")
 async def sync(
     item_id: str, body: SyncBody,
-    token: str = Depends(get_abs_token), codex_token: str | None = Depends(get_codex_token),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    codex_token: str | None = Depends(get_codex_token),
 ):
+    conn, abs_id = await resolve(identity, db, item_id)
     await abs_client.sync_session(
-        token, body.sessionId,
+        conn.base_url, conn.token, body.sessionId,
         current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
     )
-    if codex_token:
+    # Codex only knows the PRIMARY server's items (it computes book-keys from
+    # its own ABS connection), so only push those — and with the real abs id.
+    if codex_token and conn.is_primary:
         await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
-            library_item_id=item_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
+            library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
         )
     return {"ok": True}
 
@@ -82,35 +97,48 @@ async def sync(
 @router.post("/{item_id}/close")
 async def close(
     item_id: str, body: SyncBody,
-    token: str = Depends(get_abs_token), codex_token: str | None = Depends(get_codex_token),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+    codex_token: str | None = Depends(get_codex_token),
 ):
+    conn, abs_id = await resolve(identity, db, item_id)
     await abs_client.close_session(
-        token, body.sessionId,
+        conn.base_url, conn.token, body.sessionId,
         current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
     )
-    if codex_token:
+    if codex_token and conn.is_primary:
         await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
-            library_item_id=item_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
+            library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
         )
     return {"ok": True}
 
 
 @router.delete("/{item_id}/progress")
-async def discard_progress(item_id: str, token: str = Depends(get_abs_token)):
+async def discard_progress(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Discard audiobook progress — the same "wipe it, don't try to PATCH it
     to zero" fix the mobile app uses for a stuck/wrong position."""
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        await abs_client.delete_progress(token, item_id)
+        await abs_client.delete_progress(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
 
 
 @router.get("/{item_id}/bookmarks")
-async def list_bookmarks(item_id: str, token: str = Depends(get_abs_token)):
+async def list_bookmarks(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        bookmarks = await abs_client.list_bookmarks(token, item_id)
+        bookmarks = await abs_client.list_bookmarks(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     return [{"timeS": b.get("time", 0), "title": b.get("title", ""), "createdAt": b.get("createdAt")} for b in bookmarks]
@@ -122,37 +150,56 @@ class AddBookmarkBody(BaseModel):
 
 
 @router.post("/{item_id}/bookmarks")
-async def add_bookmark(item_id: str, body: AddBookmarkBody, token: str = Depends(get_abs_token)):
+async def add_bookmark(
+    item_id: str, body: AddBookmarkBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        await abs_client.add_bookmark(token, item_id, time_s=body.timeS, title=body.title or "Bookmark")
+        await abs_client.add_bookmark(conn.base_url, conn.token, abs_id, time_s=body.timeS, title=body.title or "Bookmark")
     except AbsError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
 
 
 @router.delete("/{item_id}/bookmarks/{time_s}")
-async def remove_bookmark(item_id: str, time_s: int, token: str = Depends(get_abs_token)):
+async def remove_bookmark(
+    item_id: str, time_s: int,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        await abs_client.delete_bookmark(token, item_id, time_s)
+        await abs_client.delete_bookmark(conn.base_url, conn.token, abs_id, time_s)
     except AbsError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
 
 
 @stream_router.get("")
-async def stream(request: Request, path: str = Query(...), token: str = Depends(get_abs_token)):
+async def stream(
+    request: Request,
+    path: str = Query(...),
+    server: str = Query(""),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Proxies one audio track's bytes from ABS, forwarding the client's Range
     header and relaying back ABS's 206/Content-Range/Accept-Ranges verbatim —
     without that, the <audio> element's scrubber can't seek (every seek would
     have to re-download from byte 0). [path] must be an /api/items/... URL that
     /api/play just handed the frontend; anything else is rejected so this can't
-    be turned into an open proxy to an arbitrary ABS_URL path.
-    """
+    be turned into an open proxy to an arbitrary path. [server] names which
+    connected ABS server to proxy from (bare "" = the primary)."""
     raw_path = unquote(path)
     if not raw_path.startswith("/api/items/"):
         raise HTTPException(400, "Invalid stream path.")
-    url = abs_client.stream_url(raw_path)
-    headers = {"Authorization": f"Bearer {token}"}
+    conn = next((c for c in await list_connections(identity, db) if c.key == server), None)
+    if conn is None:
+        raise HTTPException(400, "Unknown Audiobookshelf server for this stream.")
+    url = abs_client.stream_url(conn.base_url, raw_path)
+    headers = {"Authorization": f"Bearer {conn.token}"}
     range_header = request.headers.get("range")
     if range_header:
         headers["Range"] = range_header
