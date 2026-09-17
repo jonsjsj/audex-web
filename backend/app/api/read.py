@@ -8,7 +8,7 @@ consume. Position (a Readium Locator) round-trips through ABS's own
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +59,7 @@ async def _get_parsed(conn: AbsConn, identity_id: int, item_id: str, abs_id: str
 @router.get("/{item_id}/manifest")
 async def get_manifest(
     item_id: str,
+    request: Request,
     identity: Identity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ):
@@ -69,7 +70,24 @@ async def get_manifest(
         raise HTTPException(502, str(e))
     except EpubError as e:
         raise HTTPException(422, str(e))
-    return build_manifest(parsed, self_url=f"/api/read/{item_id}/manifest")
+    # MUST be absolute (scheme + host), not just a path: @readium/shared's
+    # Manifest.baseURL strips the last segment off this `self` link to get
+    # the publication's base, and @readium/navigator feeds that straight into
+    # each reading frame's Content-Security-Policy as an allowed domain. A
+    # relative URL there is a syntactically invalid CSP source — the browser
+    # drops it silently (visible only as a console warning, not an error the
+    # app sees), which starves every directive down to 'unsafe-inline'/blob:
+    # only and leaves each chapter frame stuck never becoming visible.
+    # uvicorn isn't told to trust proxy headers (no --proxy-headers flag), so
+    # request.base_url reflects the scheme of the raw connection from
+    # whatever's directly in front of it (NPMplus/Cloudflare), not what the
+    # browser actually used — check X-Forwarded-Proto ourselves rather than
+    # bake in an http:// URL a browser loaded over https will reject as a
+    # mixed-content CSP source.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    self_url = f"{scheme}://{host}/api/read/{item_id}/manifest"
+    return build_manifest(parsed, self_url=self_url)
 
 
 @router.get("/{item_id}/res/{path:path}")
