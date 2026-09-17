@@ -7,6 +7,21 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.4] - 2026-09-17
+
+### Fixed
+- **The Reader still crashed on every book with no saved reading position**
+  ("Cannot read properties of undefined (reading 'locations')"), even after
+  0.3.1's fix — that fix guarded our own code, but the actual crash was in
+  `@readium/navigator` itself. Our EPUB manifest never advertised a Readium
+  "position-list" link, so the navigator's own position list was always
+  empty; its internal fallback (`this.positions[0]` when no initial locator
+  is given) landed on `undefined` and crashed reading `.locations` off it —
+  which is exactly what happens opening any book you haven't started yet.
+  The reader now builds one locator per chapter itself whenever the
+  manifest doesn't supply a position list, so the navigator always has
+  something to fall back to.
+
 ## [0.4.3] - 2026-09-17
 
 ### Added
