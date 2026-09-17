@@ -7,6 +7,19 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.6] - 2026-09-17
+
+### Fixed
+- **Reader chapters rendered unstyled**, with the console showing "Refused
+  to apply style ... MIME type ('text/html')" for stylesheet.css and
+  page_styles.css. The manifest's `self` link (fixed for CSP in 0.4.5)
+  pointed one directory too high — chapter text loads through a separately
+  configured path and was unaffected, but each chapter's own relative
+  references (stylesheets, images) resolve against that `self` link's
+  stripped base, so they landed outside where resources are actually
+  served and silently caught the SPA's catch-all page instead. Now points
+  inside the resource route so both resolve to the same root.
+
 ## [0.4.5] - 2026-09-17
 
 ### Fixed
