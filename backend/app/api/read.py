@@ -86,7 +86,16 @@ async def get_manifest(
     # mixed-content CSP source.
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host", request.url.netloc)
-    self_url = f"{scheme}://{host}/api/read/{item_id}/manifest"
+    # The trailing path segment here is never actually fetched — Readium
+    # only strips it off to compute pub.baseURL (see Manifest.baseURL: "the
+    # URL with the `self` Link's last path segment removed"). What's left
+    # MUST be the same root the readingOrder/resources hrefs are relative
+    # to, i.e. RES_BASE (.../res/) on the frontend, not the bare item route
+    # — every chapter's own HTML sets a <base> from THIS base for its OWN
+    # relative refs (stylesheet.css, images/...), so pointing it at
+    # .../api/read/{id}/ instead of .../res/ 404s every such reference
+    # (as text/html from our SPA fallback, not even a real 404 body).
+    self_url = f"{scheme}://{host}/api/read/{item_id}/res/manifest"
     return build_manifest(parsed, self_url=self_url)
 
 
