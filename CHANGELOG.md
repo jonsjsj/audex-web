@@ -7,6 +7,24 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.0] - 2026-09-17
+
+### Added
+- **Playback now survives navigation.** Audio used to live and die with the
+  Player page — clicking anywhere else stopped it. All playback state and
+  the `<audio>` element now live above the router, so it keeps playing while
+  you browse Library, Series, Authors, Narrators, or Settings.
+- **Mini-player** — docked bottom-right on every page except the full Player
+  view while something's playing: cover, title, author, play/pause, stop,
+  and a progress bar. Tap it to jump back into the full player.
+- Author, series, and narrator on the Player page are now clickable, same as
+  on a book's detail page.
+
+### Changed
+- Bookmark titles now record when and on what they were made — e.g.
+  "webaudex win 11 21.42 19.09" — instead of the audio position, which is
+  already shown separately in the bookmark list.
+
 ## [0.3.1] - 2026-09-16
 
 ### Fixed
