@@ -7,6 +7,22 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.7] - 2026-09-17
+
+### Added
+- **Sorting on Series, Authors, and Narrators** — previously always
+  alphabetical with no way to change it. Series: Latest release / Name /
+  Author. Authors/Narrators: Name / Latest release / Most books. Persists
+  per page, like the existing grid/list toggle.
+- **Library sort gained "Release date"**, alongside the existing
+  Title/Author/Recently added/Duration/Progress options.
+
+### Changed
+- **Switching between listening and reading is now a primary, always-visible
+  button** — a "Read" pill on the Player and a "Listen" button in the
+  Reader header — instead of a small link buried below the transport
+  controls that was easy to miss.
+
 ## [0.4.6] - 2026-09-17
 
 ### Fixed
