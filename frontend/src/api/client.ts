@@ -262,6 +262,10 @@ export const api = {
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
   checkUpdate: () => request<UpdateCheck>("/api/admin/update/check"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
+  updateStatus: () =>
+    request<{ state: string; step: string | null; target: string | null; at: number | null }>(
+      "/api/admin/update/status",
+    ),
 
   reportAvailable: () => request<{ available: boolean }>("/api/report/available"),
   submitReport: (body: { message: string; note?: string; itemId?: string; stack?: string; url?: string; automatic?: boolean }) =>

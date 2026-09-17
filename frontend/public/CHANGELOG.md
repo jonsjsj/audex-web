@@ -7,6 +7,19 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.1] - 2026-09-17
+
+### Fixed
+- **The self-update button could silently do nothing.** The new image was
+  pulled inside a fire-and-forget helper with `curl -s`, which swallowed any
+  pull error (private/renamed GHCR package, wrong tag, no network) — the button
+  reported "Update started" and then nothing changed, with no way to tell why.
+  Now the image is pulled **in-process before the swap**, so a failed pull is
+  reported on the Settings page with the actual reason; the recreate helper runs
+  each step with `curl -f` and records exactly which step failed; and the page
+  polls after the swap and shows **"Updated to vX"** or the failing step instead
+  of guessing. A wrong `UPDATE_CONTAINER_NAME` now returns a clear message too.
+
 ## [0.4.0] - 2026-09-17
 
 ### Added
