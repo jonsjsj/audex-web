@@ -229,6 +229,14 @@ export const api = {
     }),
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
 
+  // The shipped changelog file (served from the SPA's static root, not /api).
+  // Raw text — parsed client-side for the Settings About panel.
+  changelog: async (): Promise<string> => {
+    const res = await fetch("/CHANGELOG.md", { credentials: "include" });
+    if (!res.ok) throw new ApiError(res.status, `Couldn't load the changelog (${res.status})`);
+    return res.text();
+  },
+
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
   checkUpdate: () => request<UpdateCheck>("/api/admin/update/check"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),

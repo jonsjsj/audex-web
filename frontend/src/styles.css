@@ -1467,14 +1467,75 @@ input:focus {
   line-height: 1.5;
   margin: 0 0 0.9rem;
 }
-.settings-update-preview {
-  white-space: pre-line; /* preserves the changelog entry's own line breaks */
+/* Section header with an inline info toggle (Codex sync's ⓘ). */
+.settings-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+.settings-section-head .settings-section-title {
+  margin: 0;
+}
+.settings-info-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.settings-info-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+
+/* A plain text link-button (expand/collapse the full changelog). */
+.settings-link-btn {
+  background: none;
+  border: none;
+  padding: 0.2rem 0;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-link-btn:hover {
+  text-decoration: underline;
+}
+
+/* Changelog entries in the About panel (this build, the next release, and the
+   expanded full history). */
+.settings-changelog-block {
   background: var(--surface-2);
   border-radius: 8px;
   padding: 0.7rem 0.9rem;
+  margin: 0 0 0.7rem;
 }
-.settings-update-preview strong {
+.settings-changelog-ver {
+  font-weight: 700;
   color: var(--accent);
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+.settings-changelog-date {
+  color: var(--muted);
+  font-weight: 400;
+}
+.settings-changelog-body {
+  white-space: pre-line; /* preserves the changelog entry's own line breaks */
+  margin: 0;
+}
+.settings-changelog-full {
+  margin-top: 0.7rem;
+  max-height: 24rem;
+  overflow-y: auto;
 }
 .settings-row {
   display: flex;
