@@ -8,15 +8,18 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_abs_token
+from app.api.connections import AbsConn, connections_for_library, list_connections, resolve, tag
+from app.api.deps import get_current_identity
 from app.core import abs_client
 from app.core.abs_client import AbsError
+from app.core.database import Identity, get_db
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
 
-def _book_summary(item: dict, progress: dict | None = None) -> dict:
+def _book_summary(conn: AbsConn, item: dict, progress: dict | None = None) -> dict:
     media = item.get("media") or {}
     meta = media.get("metadata") or {}
     authors = meta.get("authors") or []
@@ -37,17 +40,27 @@ def _book_summary(item: dict, progress: dict | None = None) -> dict:
     # app's cross-edition "furthest wins": one progress bar per library card,
     # not two competing ones.
     pct = max(float(p.get("progress") or 0), float(p.get("ebookProgress") or 0))
+    tagged_id = tag(conn, item["id"])
     return {
-        "id": item["id"],
+        "id": tagged_id,
+        "serverKey": conn.key,  # "" = primary; identifies which ABS server this came from
+        "serverName": conn.name,
         "title": meta.get("title") or "(untitled)",
         "subtitle": meta.get("subtitle"),
         "author": author,
         "series": series,
         "durationS": media.get("duration"),
         "mediaType": item.get("mediaType", "book"),
-        "hasEbook": bool(media.get("ebookFile")),
+        # `ebookFormat` (a string like "epub") is present on BOTH the library
+        # LIST response and the expanded detail; `ebookFile` (the full file
+        # object) only appears on the expanded detail. Keying `hasEbook` off
+        # `ebookFile` alone left every library-card ebook undetected — no
+        # ebook icon, an empty "Audio + ebook" filter, and no Read button.
+        # The mobile app keys this off `ebookFormat` for exactly this reason
+        # (CatalogRepositoryImpl: `hasEbook = !ebookFormat.isNullOrBlank()`).
+        "hasEbook": bool(media.get("ebookFormat")) or bool(media.get("ebookFile")),
         "numAudioFiles": media.get("numAudioFiles", 0),
-        "coverUrl": f"/api/library/items/{item['id']}/cover",
+        "coverUrl": f"/api/library/items/{tagged_id}/cover",
         "progress": pct,
         "isFinished": bool(p.get("isFinished")),
         "lastUpdate": p.get("lastUpdate"),  # epoch ms, or None if never opened — for sorting "Continue"
@@ -137,49 +150,106 @@ def _author_entries(item: dict) -> list[tuple[str, str | None]]:
 
 def _narrator_names(item: dict) -> list[str]:
     """ABS has no dedicated Narrator entity (no id, no image, no bio API —
-    unlike Author) — just a flat string list on the book's own metadata."""
+    unlike Author) — just a flat string list on the book's own metadata.
+
+    Same list-endpoint-shape caveat as series and authors: the library LIST
+    response often only carries the flat `narratorName` string ("A, B, C"),
+    not the structured `narrators` array (that comes with the expanded
+    single-item endpoint). Missing this fallback was why /narrators came back
+    empty. The mobile app does the same: `narrators.ifEmpty { split(narratorName) }`."""
     meta = (item.get("media") or {}).get("metadata") or {}
-    return [n.strip() for n in (meta.get("narrators") or []) if (n or "").strip()]
+    names = [n.strip() for n in (meta.get("narrators") or []) if (n or "").strip()]
+    if not names and meta.get("narratorName"):
+        names = [n.strip() for n in str(meta["narratorName"]).split(",") if n.strip()]
+    return names
+
+
+async def _conn_book_library_ids(conn: AbsConn) -> list[str]:
+    """A connection's book-library ids (podcasts excluded, same as /libraries)."""
+    libs = await abs_client.libraries(conn.base_url, conn.token)
+    return [lib["id"] for lib in libs if lib.get("mediaType", "book") == "book"]
+
+
+async def _progress_by_item(conn: AbsConn) -> dict[str, dict]:
+    """One /api/me call per connection, reused for every book on the page.
+    Best-effort: a failed fetch shows that server's books with no progress
+    badges rather than failing the whole page over a secondary feature. Keyed
+    by the RAW ABS item id (progress is looked up before the id is tagged)."""
+    me = await abs_client.me(conn.base_url, conn.token)
+    entries = (me or {}).get("mediaProgress") or []
+    return {e["libraryItemId"]: e for e in entries if e.get("libraryItemId")}
+
+
+async def _iter_books(
+    identity: Identity, db: AsyncSession, library_sel: str
+) -> list[tuple[AbsConn, dict, dict]]:
+    """(connection, raw ABS item, tagged summary) across every connection the
+    selection covers. Per-connection failures are tolerated (one unreachable
+    extra server shouldn't blank the whole combined view); if every connection
+    fails, that's surfaced as a 502 so a genuinely-down single server still
+    reports an error rather than an empty library. The raw item is carried
+    alongside the summary so the series/authors/narrators groupings can read
+    its metadata without a second pass or leaking `_`-fields into responses."""
+    pairs = await connections_for_library(identity, db, library_sel)
+    if not pairs:
+        raise HTTPException(400, "That Audiobookshelf server isn't connected.")
+    triples: list[tuple[AbsConn, dict, dict]] = []
+    ok = 0
+    errors = 0
+    for conn, lib_id in pairs:
+        try:
+            lib_ids = [lib_id] if lib_id else await _conn_book_library_ids(conn)
+            progress = await _progress_by_item(conn)
+            for lid in lib_ids:
+                page = await abs_client.library_items(conn.base_url, conn.token, lid)
+                for item in page.get("results", []):
+                    triples.append((conn, item, _book_summary(conn, item, progress.get(item["id"]))))
+            ok += 1
+        except AbsError:
+            errors += 1
+            continue
+    if ok == 0 and errors > 0:
+        raise HTTPException(502, "Couldn't reach your Audiobookshelf server.")
+    return triples
 
 
 @router.get("/libraries")
-async def get_libraries(token: str = Depends(get_abs_token)):
-    try:
-        libs = await abs_client.libraries(token)
-    except AbsError as e:
-        raise HTTPException(502, str(e))
-    return [
-        {"id": lib["id"], "name": lib.get("name", ""), "mediaType": lib.get("mediaType", "book")}
-        for lib in libs
-        if lib.get("mediaType", "book") == "book"  # podcasts are a separate later phase
-    ]
-
-
-async def _progress_by_item(token: str) -> dict[str, dict]:
-    """One /api/me call, reused for every book on the page — the same shape
-    already relied on elsewhere (abs_client.me(), get_progress()'s single-item
-    GET). Best-effort: a failed fetch shows the library with no progress
-    badges rather than failing the whole page over a secondary feature."""
-    me = await abs_client.me(token)
-    entries = (me or {}).get("mediaProgress") or []
-    return {e["libraryItemId"]: e for e in entries if e.get("libraryItemId")}
+async def get_libraries(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
+    """Every book library across every connected server, ids tagged so the
+    frontend can select one (or "all", the default combined view)."""
+    out = []
+    for conn in await list_connections(identity, db):
+        try:
+            libs = await abs_client.libraries(conn.base_url, conn.token)
+        except AbsError:
+            continue  # one unreachable server shouldn't blank the picker
+        for lib in libs:
+            if lib.get("mediaType", "book") != "book":  # podcasts are a later phase
+                continue
+            name = lib.get("name", "")
+            out.append({
+                "id": tag(conn, lib["id"]),
+                "name": name,
+                "mediaType": lib.get("mediaType", "book"),
+                "serverKey": conn.key,
+                "serverName": conn.name,
+            })
+    return out
 
 
 @router.get("/items")
 async def get_items(
     library_id: str = Query(..., alias="libraryId"),
     search: str = Query("", alias="search"),
-    token: str = Depends(get_abs_token),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
 ):
     """One page covers a homelab-scale library; `search` filters title/author/
     series client-side (case-insensitive substring) rather than round-tripping to
-    ABS's own filter query language, which the mobile app doesn't use either."""
-    try:
-        page = await abs_client.library_items(token, library_id)
-    except AbsError as e:
-        raise HTTPException(502, str(e))
-    progress = await _progress_by_item(token)
-    books = [_book_summary(item, progress.get(item["id"])) for item in page.get("results", [])]
+    ABS's own filter query language, which the mobile app doesn't use either.
+    `libraryId` may be "all" to combine every book library across every
+    connected server into one view."""
+    books = [b for _, _, b in await _iter_books(identity, db, library_id)]
     if search.strip():
         q = search.strip().lower()
         books = [
@@ -191,19 +261,24 @@ async def get_items(
 
 
 @router.get("/items/{item_id}")
-async def get_item(item_id: str, token: str = Depends(get_abs_token)):
+async def get_item(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        item = await abs_client.item_detail(token, item_id)
+        item = await abs_client.item_detail(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     media = item.get("media") or {}
     try:
-        progress = await abs_client.get_progress(token, item_id)
+        progress = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
     except AbsError:
         # Best-effort, same as the library list: the book itself loaded fine,
         # don't fail the whole page over a progress badge.
         progress = None
-    summary = _book_summary(item, progress)
+    summary = _book_summary(conn, item, progress)
     summary["chapters"] = [
         {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
         for c in media.get("chapters", [])
@@ -213,24 +288,18 @@ async def get_item(item_id: str, token: str = Depends(get_abs_token)):
 
 
 @router.get("/series")
-async def get_series(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
-    """Series grouped from this library's own items (not a Hardcover-style
-    fill-in of volumes you don't own — Codex does that; this just organizes
-    what's actually in your ABS library). Books embedded directly rather than
-    a separate per-series fetch: a homelab-scale library's whole item list
-    already fits in one call (see library_items()'s own docstring)."""
-    try:
-        page = await abs_client.library_items(token, library_id)
-    except AbsError as e:
-        raise HTTPException(502, str(e))
-    progress = await _progress_by_item(token)
+async def get_series(
+    library_id: str = Query(..., alias="libraryId"),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Series grouped from the selected libraries' own items (not a Hardcover-
+    style fill-in of volumes you don't own — Codex does that; this just
+    organizes what's actually in your ABS libraries). `libraryId` may be "all"
+    to combine every book library across every connected server."""
     groups: dict[str, list[tuple[float | None, dict]]] = {}
-    for item in page.get("results", []):
-        entries = _series_entries(item)
-        if not entries:
-            continue
-        book = _book_summary(item, progress.get(item["id"]))
-        for name, seq in entries:
+    for _conn, item, book in await _iter_books(identity, db, library_id):
+        for name, seq in _series_entries(item):
             groups.setdefault(name, []).append((seq, book))
     result = []
     for name, entries in groups.items():
@@ -241,25 +310,22 @@ async def get_series(library_id: str = Query(..., alias="libraryId"), token: str
 
 
 @router.get("/authors")
-async def get_authors(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
-    """Same idea as /series, grouped by author instead. Carries the ABS
-    author id (when known) so the frontend can show a real headshot via
-    /authors/{id}/image instead of a book-cover stand-in."""
-    try:
-        page = await abs_client.library_items(token, library_id)
-    except AbsError as e:
-        raise HTTPException(502, str(e))
-    progress = await _progress_by_item(token)
+async def get_authors(
+    library_id: str = Query(..., alias="libraryId"),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Same idea as /series, grouped by author instead. Carries the (tagged)
+    ABS author id when known so the frontend can show a real headshot via
+    /authors/{id}/image instead of a book-cover stand-in. `libraryId` may be
+    "all" to combine every book library across every connected server."""
     groups: dict[str, dict] = {}  # name -> {id, books}
-    for item in page.get("results", []):
-        entries = _author_entries(item)
-        if not entries:
-            continue
-        book = _book_summary(item, progress.get(item["id"]))
-        for name, author_id in entries:
+    for conn, item, book in await _iter_books(identity, db, library_id):
+        for name, author_id in _author_entries(item):
             g = groups.setdefault(name, {"id": None, "books": []})
             if author_id and not g["id"]:
-                g["id"] = author_id
+                # Tagged so the image/bio endpoints know which server to ask.
+                g["id"] = tag(conn, author_id)
             g["books"].append(book)
     result = [
         {
@@ -275,51 +341,58 @@ async def get_authors(library_id: str = Query(..., alias="libraryId"), token: st
 
 
 @router.get("/narrators")
-async def get_narrators(library_id: str = Query(..., alias="libraryId"), token: str = Depends(get_abs_token)):
+async def get_narrators(
+    library_id: str = Query(..., alias="libraryId"),
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Same idea as /authors, grouped by narrator instead. No id/imageUrl —
-    ABS has no Narrator entity to look either up from (see _narrator_names)."""
-    try:
-        page = await abs_client.library_items(token, library_id)
-    except AbsError as e:
-        raise HTTPException(502, str(e))
-    progress = await _progress_by_item(token)
+    ABS has no Narrator entity to look either up from (see _narrator_names).
+    `libraryId` may be "all" to combine every book library across every
+    connected server."""
     groups: dict[str, list[dict]] = {}
-    for item in page.get("results", []):
-        names = _narrator_names(item)
-        if not names:
-            continue
-        book = _book_summary(item, progress.get(item["id"]))
-        for name in names:
+    for _conn, item, book in await _iter_books(identity, db, library_id):
+        for name in _narrator_names(item):
             groups.setdefault(name, []).append(book)
     result = [
-        {"name": name, "books": sorted(books, key=lambda b: b["title"].lower())}
-        for name, books in groups.items()
+        {"name": name, "books": sorted(books_, key=lambda b: b["title"].lower())}
+        for name, books_ in groups.items()
     ]
     result.sort(key=lambda g: g["name"].lower())
     return result
 
 
 @router.get("/authors/{author_id}/bio")
-async def get_author_bio(author_id: str, token: str = Depends(get_abs_token)):
+async def get_author_bio(
+    author_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """A one-off ABS call, not embedded in /authors' list response — a bio can
     run to a paragraph or more, not worth shipping for every author on every
     library load when only the one being opened needs it."""
-    detail = await abs_client.author_detail(token, author_id)
+    conn, abs_id = await resolve(identity, db, author_id)
+    detail = await abs_client.author_detail(conn.base_url, conn.token, abs_id)
     if not detail:
         return {"description": None}
     return {"description": detail.get("description")}
 
 
 @router.get("/authors/{author_id}/image")
-async def get_author_image(author_id: str, token: str = Depends(get_abs_token)):
+async def get_author_image(
+    author_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Proxies an ABS author's headshot — same reasoning as /items/{id}/cover
     (an <img> tag can't carry the Bearer token). A 404 here (author has no
     photo set in ABS) is normal, not an error — the frontend falls back to
     initials rather than surfacing it."""
-    url = abs_client.author_image_url(author_id)
+    conn, abs_id = await resolve(identity, db, author_id)
+    url = abs_client.author_image_url(conn.base_url, abs_id)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            resp = await client.get(url, headers={"Authorization": f"Bearer {conn.token}"})
     except httpx.HTTPError:
         raise HTTPException(502, "Couldn't reach Audiobookshelf for this author's photo.")
     if resp.status_code != 200:
@@ -332,15 +405,20 @@ async def get_author_image(author_id: str, token: str = Depends(get_abs_token)):
 
 
 @router.get("/items/{item_id}/cover")
-async def get_cover(item_id: str, token: str = Depends(get_abs_token)):
+async def get_cover(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Proxies ABS's cover art — the browser needs an <img src>, and an <img> tag
     can't carry an Authorization header, so this is the one legitimate place a
     GET is forwarded with the token attached server-side rather than routed
     through fetch()+blob (simpler, and browsers cache <img> responses for free)."""
-    url = abs_client.cover_url(item_id)
+    conn, abs_id = await resolve(identity, db, item_id)
+    url = abs_client.cover_url(conn.base_url, abs_id)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            resp = await client.get(url, headers={"Authorization": f"Bearer {conn.token}"})
     except httpx.HTTPError:
         raise HTTPException(502, "Couldn't reach Audiobookshelf for the cover.")
     if resp.status_code != 200:

@@ -11,11 +11,13 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_abs_token, get_current_identity
+from app.api.connections import AbsConn, resolve
+from app.api.deps import get_current_identity
 from app.core import abs_client
 from app.core.abs_client import AbsError
-from app.core.database import Identity
+from app.core.database import Identity, get_db
 from app.core.epub import EpubError, ParsedEpub, build_manifest, parse_epub
 
 router = APIRouter(prefix="/api/read", tags=["read"])
@@ -31,7 +33,8 @@ _cache: dict[tuple[int, str], ParsedEpub] = {}
 _cache_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
-async def _get_parsed(token: str, identity_id: int, item_id: str) -> ParsedEpub:
+async def _get_parsed(conn: AbsConn, identity_id: int, item_id: str, abs_id: str) -> ParsedEpub:
+    # Cache key uses the NAMESPACED id so two servers' items can't collide.
     key = (identity_id, item_id)
     cached = _cache.get(key)
     if cached is not None:
@@ -45,7 +48,7 @@ async def _get_parsed(token: str, identity_id: int, item_id: str) -> ParsedEpub:
         cached = _cache.get(key)  # re-check: someone else may have filled it while we waited
         if cached is not None:
             return cached
-        data = await abs_client.ebook_file(token, item_id)
+        data = await abs_client.ebook_file(conn.base_url, conn.token, abs_id)
         parsed = parse_epub(data)  # raises EpubError — let the caller turn that into a 422
         if len(_cache) >= _CACHE_MAX:
             del _cache[next(iter(_cache))]  # dict preserves insertion order — drop the oldest
@@ -57,10 +60,11 @@ async def _get_parsed(token: str, identity_id: int, item_id: str) -> ParsedEpub:
 async def get_manifest(
     item_id: str,
     identity: Identity = Depends(get_current_identity),
-    token: str = Depends(get_abs_token),
+    db: AsyncSession = Depends(get_db),
 ):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        parsed = await _get_parsed(token, identity.id, item_id)
+        parsed = await _get_parsed(conn, identity.id, item_id, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     except EpubError as e:
@@ -73,10 +77,11 @@ async def get_resource(
     item_id: str,
     path: str,
     identity: Identity = Depends(get_current_identity),
-    token: str = Depends(get_abs_token),
+    db: AsyncSession = Depends(get_db),
 ):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        parsed = await _get_parsed(token, identity.id, item_id)
+        parsed = await _get_parsed(conn, identity.id, item_id, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     except EpubError as e:
@@ -93,12 +98,17 @@ async def get_resource(
 
 
 @router.get("/{item_id}/position")
-async def get_position(item_id: str, token: str = Depends(get_abs_token)):
+async def get_position(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """The saved Locator (as JSON) to resume from, or None for a book that's
     never been opened — distinct from a genuinely-empty book, so the frontend
     can tell "start at the beginning" from "we don't know yet, don't move"."""
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        prog = await abs_client.get_progress(token, item_id)
+        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     raw = prog.get("ebookLocation") if prog else None
@@ -120,10 +130,15 @@ class SavePositionBody(BaseModel):
 
 
 @router.put("/{item_id}/position")
-async def save_position(item_id: str, body: SavePositionBody, token: str = Depends(get_abs_token)):
+async def save_position(
+    item_id: str, body: SavePositionBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
         await abs_client.save_ebook_progress(
-            token, item_id, ebook_location=json.dumps(body.locator), ebook_progress=body.progress,
+            conn.base_url, conn.token, abs_id, ebook_location=json.dumps(body.locator), ebook_progress=body.progress,
         )
     except AbsError as e:
         raise HTTPException(502, str(e))
@@ -131,14 +146,19 @@ async def save_position(item_id: str, body: SavePositionBody, token: str = Depen
 
 
 @router.delete("/{item_id}/position")
-async def discard_position(item_id: str, token: str = Depends(get_abs_token)):
+async def discard_position(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
     """Discard ebook progress — see play.py's discard_progress for the audio
     side; each format's own progress can be wrong independently (ABS keeps
     them on the SAME record, but a book bought as audio-only vs ebook-only
     never shares one, so there's no cross-format entanglement to worry about
     here the way the mobile app's cross-edition model has to)."""
+    conn, abs_id = await resolve(identity, db, item_id)
     try:
-        await abs_client.delete_progress(token, item_id)
+        await abs_client.delete_progress(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
     return {"ok": True}

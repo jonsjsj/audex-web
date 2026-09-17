@@ -6,7 +6,7 @@ import GroupBrowser from "../components/GroupBrowser";
 
 export default function Narrators() {
   const navigate = useNavigate();
-  const { libraryId } = useShell();
+  const { libraryId, search } = useShell();
   const [groups, setGroups] = useState<BookGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +29,7 @@ export default function Narrators() {
       groups={groups}
       storageKey="narrators"
       isPerson
+      search={search}
       onOpen={(name) => navigate(`/narrators/${encodeURIComponent(name)}`)}
     />
   );

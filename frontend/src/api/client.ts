@@ -21,9 +21,19 @@ export interface Me {
 }
 
 export interface Library {
-  id: string;
+  id: string; // namespaced (bare for the primary server, key::id for additional ones)
   name: string;
   mediaType: string;
+  serverKey?: string; // "" = primary; identifies which ABS server this library is on
+  serverName?: string;
+}
+
+export interface AbsServerInfo {
+  key: string; // "" for the primary (deploy-configured) server, else its numeric id
+  name: string;
+  url: string;
+  username: string | null;
+  primary: boolean;
 }
 
 export interface Chapter {
@@ -46,6 +56,8 @@ export interface Book {
   coverUrl: string;
   progress: number; // 0..1, furthest of audio/ebook progress
   isFinished: boolean;
+  serverKey?: string; // which ABS server this book is on ("" = primary)
+  serverName?: string;
   lastUpdate: number | null; // epoch ms, null if never opened
   audioProgress: number; // 0..1, raw ABS audio progress (currentTime/duration)
   ebookProgress: number; // 0..1, raw ABS ebook progress
@@ -177,6 +189,16 @@ export const api = {
   linkCodex: (token: string) =>
     request<{ ok: true }>("/api/auth/link/codex", { method: "POST", body: JSON.stringify({ token }) }),
   unlinkCodex: () => request<{ ok: true }>("/api/auth/unlink/codex", { method: "POST" }),
+
+  // Additional Audiobookshelf servers (beyond the deploy-configured primary).
+  absServers: () => request<AbsServerInfo[]>("/api/auth/abs/servers"),
+  addAbsServer: (body: { url: string; username: string; password: string; name?: string }) =>
+    request<{ ok: true; key: string; name: string; username: string | null }>("/api/auth/abs/servers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeAbsServer: (key: string) =>
+    request<{ ok: true }>(`/api/auth/abs/servers/${encodeURIComponent(key)}`, { method: "DELETE" }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
 
   libraries: () => request<Library[]>("/api/library/libraries"),
@@ -229,9 +251,21 @@ export const api = {
     }),
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
 
+  // The shipped changelog file (served from the SPA's static root, not /api).
+  // Raw text — parsed client-side for the Settings About panel.
+  changelog: async (): Promise<string> => {
+    const res = await fetch("/CHANGELOG.md", { credentials: "include" });
+    if (!res.ok) throw new ApiError(res.status, `Couldn't load the changelog (${res.status})`);
+    return res.text();
+  },
+
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
   checkUpdate: () => request<UpdateCheck>("/api/admin/update/check"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
+  updateStatus: () =>
+    request<{ state: string; step: string | null; target: string | null; at: number | null }>(
+      "/api/admin/update/status",
+    ),
 
   reportAvailable: () => request<{ available: boolean }>("/api/report/available"),
   submitReport: (body: { message: string; note?: string; itemId?: string; stack?: string; url?: string; automatic?: boolean }) =>

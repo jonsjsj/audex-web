@@ -41,6 +41,30 @@ class Identity(Base):
     created_at = Column(Float, default=time.time)
 
 
+class AbsServer(Base):
+    """An ADDITIONAL Audiobookshelf server a person has connected, beyond the
+    one the deploy is configured with (settings.ABS_URL, whose token lives on
+    Identity.abs_token_encrypted — that stays the "primary" connection for
+    backward compatibility). The mobile app syncs every enabled server into one
+    catalog; this table is how audex-web holds the extras per person.
+
+    Each row carries its OWN base_url and token — an extra server is usually a
+    different box entirely, so it can't share the primary's URL or credentials.
+    Item and library ids from these servers are namespaced `{row id}::{abs id}`
+    at the API boundary (see app/api/connections.py) so they never collide with
+    the primary server's bare ids or each other."""
+    __tablename__ = "abs_servers"
+
+    id = Column(Integer, primary_key=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=False, index=True)
+    name = Column(String, nullable=True)  # optional label; the host is used when blank
+    base_url = Column(String, nullable=False)
+    abs_user_id = Column(String, nullable=True)
+    abs_username = Column(String, nullable=True)
+    token_encrypted = Column(String, nullable=False)
+    created_at = Column(Float, default=time.time)
+
+
 class WebSession(Base):
     """A server-side session row a signed, httpOnly cookie points at by id. Table name
     avoids colliding with SQLAlchemy's own `Session` symbol."""

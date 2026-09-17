@@ -1,20 +1,52 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, UpdateCheck } from "../api/client";
+import { AbsServerInfo, api, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
+
+interface ChangelogEntry {
+  version: string;
+  date: string | null; // ISO "YYYY-MM-DD" from the "## [x.y.z] - DATE" header, if present
+  body: string;
+}
+
+/** Parses a Keep-a-Changelog file into its release sections. Client-side so
+ *  the About panel can show this build's own release date + notes and the
+ *  full history, from the same /CHANGELOG.md the app already ships. */
+function parseChangelog(md: string): ChangelogEntry[] {
+  return md
+    .split(/^## \[/m)
+    .slice(1)
+    .map((section) => {
+      const nl = section.indexOf("\n");
+      const header = nl === -1 ? section : section.slice(0, nl);
+      const body = nl === -1 ? "" : section.slice(nl + 1).trim();
+      const vEnd = header.indexOf("]");
+      const version = (vEnd === -1 ? header : header.slice(0, vEnd)).trim();
+      const date = header.slice(vEnd + 1).match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+      return { version, date, body };
+    });
+}
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { me, onChanged, onSignedOut } = useShell();
+  const { me, onChanged, onSignedOut, refreshLibraries } = useShell();
+  const [servers, setServers] = useState<AbsServerInfo[] | null>(null);
+  const [addServerOpen, setAddServerOpen] = useState(false);
+  const [serverForm, setServerForm] = useState({ url: "", username: "", password: "", name: "" });
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
+  const [codexInfoOpen, setCodexInfoOpen] = useState(false);
   const [updateCapable, setUpdateCapable] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [changelog, setChangelog] = useState<ChangelogEntry[] | null>(null);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [reportAvailable, setReportAvailable] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportNote, setReportNote] = useState("");
@@ -25,6 +57,11 @@ export default function Settings() {
   useEffect(() => {
     api.updateAvailable().then((r) => setUpdateCapable(r.available)).catch(() => {});
     api.reportAvailable().then((r) => setReportAvailable(r.available)).catch(() => {});
+    api.absServers().then(setServers).catch(() => {});
+    // The shipped changelog — powers the "last updated" date, this build's
+    // notes, and the expand-to-full view. Best-effort: a failed fetch just
+    // hides those extras, the version number still shows.
+    api.changelog().then((md) => setChangelog(parseChangelog(md))).catch(() => {});
   }, []);
 
   // Separate from the capability check above — this is "is there an actual
@@ -34,6 +71,10 @@ export default function Settings() {
     setCheckingUpdate(true);
     api.checkUpdate().then(setUpdateCheck).catch(() => {}).finally(() => setCheckingUpdate(false));
   }, []);
+
+  const currentVersion = updateCheck?.currentVersion ?? null;
+  const currentEntry =
+    changelog?.find((e) => e.version === currentVersion) ?? changelog?.[0] ?? null;
 
   async function submitReport() {
     if (!reportNote.trim() || reportBusy) return;
@@ -58,16 +99,95 @@ export default function Settings() {
 
   // Rebuilds itself from the freshly-pulled GHCR image (see
   // backend/app/api/admin.py) — this page WILL go offline for a few seconds
-  // partway through, that's expected, not a failure.
+  // partway through, that's expected, not a failure. The pull now happens
+  // server-side before this returns, so a pull failure (private package, bad
+  // tag, no network) throws here with a real reason instead of silently
+  // no-opping; after that we poll for the container to come back on the new
+  // version, or for the updater to record which swap step failed.
   async function triggerUpdate() {
     setUpdating(true);
     setUpdateError(null);
+    setUpdateMessage(null);
+    let res: { message: string };
     try {
-      const res = await api.triggerUpdate();
-      setUpdateMessage(res.message);
+      res = await api.triggerUpdate();
     } catch (e) {
       setUpdateError(e instanceof Error ? e.message : "Couldn't start the update.");
       setUpdating(false);
+      return;
+    }
+    setUpdateMessage(`${res.message} Watching for it to come back…`);
+
+    const target = updateCheck?.latestVersion ?? null;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 40; i++) {
+      await sleep(3000);
+      // Did the new version come up? (Fetches throw while it's mid-restart —
+      // that's expected, keep waiting.)
+      try {
+        const h = await api.health();
+        if (target && h.version === target) {
+          setUpdateMessage(`Updated to v${target} ✓ — reload the page to use it.`);
+          setUpdating(false);
+          return;
+        }
+      } catch {
+        /* server restarting — ignore and keep polling */
+      }
+      // Did the updater record a failed swap step?
+      try {
+        const s = await api.updateStatus();
+        if (s.state === "failed") {
+          setUpdateError(
+            `Update failed while trying to ${s.step ?? "swap the container"}. ` +
+              `The app is on the old version (or your server needs a look).`,
+          );
+          setUpdating(false);
+          return;
+        }
+        if (s.state === "success" && !target) {
+          setUpdateMessage("Update finished ✓ — reload the page.");
+          setUpdating(false);
+          return;
+        }
+      } catch {
+        /* status not readable (server down mid-swap) — ignore */
+      }
+    }
+    setUpdateMessage("Couldn't confirm the update automatically — reload the page to check the version.");
+    setUpdating(false);
+  }
+
+  async function addServer() {
+    if (serverBusy || !serverForm.url.trim() || !serverForm.username.trim() || !serverForm.password) return;
+    setServerBusy(true);
+    setServerError(null);
+    try {
+      await api.addAbsServer({
+        url: serverForm.url.trim(),
+        username: serverForm.username.trim(),
+        password: serverForm.password,
+        name: serverForm.name.trim() || undefined,
+      });
+      setServerForm({ url: "", username: "", password: "", name: "" });
+      setAddServerOpen(false);
+      setServers(await api.absServers().catch(() => servers));
+      refreshLibraries(); // so the new server's libraries show in the picker right away
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : "Couldn't connect that server.");
+    } finally {
+      setServerBusy(false);
+    }
+  }
+
+  async function removeServer(key: string) {
+    setServerBusy(true);
+    try {
+      await api.removeAbsServer(key);
+      setServers(await api.absServers().catch(() => servers));
+      refreshLibraries();
+    } finally {
+      setServerBusy(false);
     }
   }
 
@@ -119,33 +239,129 @@ export default function Settings() {
           </div>
           <span className={`tag ${me.ssoLinked ? "ok" : ""}`}>{me.ssoLinked ? "SSO" : "Local sign-in"}</span>
         </div>
-        <div className="settings-row">
-          <div>
-            <div className="settings-row-label">Audiobookshelf</div>
-            <div className="settings-row-sub">{me.absUsername}</div>
-          </div>
-          <span className="tag ok">Connected</span>
-        </div>
         <button className="btn btn-secondary" style={{ width: "auto", marginTop: "0.8rem" }} onClick={signOut}>
           Sign out
         </button>
       </section>
 
       <section className="settings-section">
-        <h2 className="settings-section-title">Codex sync</h2>
+        <div className="settings-section-head">
+          <h2 className="settings-section-title">Audiobookshelf servers</h2>
+        </div>
         <p className="settings-help">
-          When you listen, audex-web sends your position to Codex right away (via its Audiobookshelf webhook) so it
-          doesn't wait for Codex's periodic sync. Create the token in Codex → Settings → API Keys.
+          Connect more than one Audiobookshelf server to see every library in one place — the Library, Series,
+          Authors and Narrators views combine them, and each server keeps its own sign-in.
         </p>
+        {(servers ?? []).map((s) => (
+          <div className="settings-row" key={s.key || "primary"}>
+            <div>
+              <div className="settings-row-label">{s.name}</div>
+              <div className="settings-row-sub">
+                {s.url}
+                {s.username ? ` · ${s.username}` : ""}
+              </div>
+            </div>
+            {s.primary ? (
+              <span className="tag ok">Primary</span>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                style={{ width: "auto" }}
+                onClick={() => removeServer(s.key)}
+                disabled={serverBusy}
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        ))}
+        {addServerOpen ? (
+          <div className="settings-server-form">
+            <input
+              className="settings-input"
+              placeholder="Server URL (https://abs.example.com)"
+              value={serverForm.url}
+              onChange={(e) => setServerForm((f) => ({ ...f, url: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              placeholder="Name (optional)"
+              value={serverForm.name}
+              onChange={(e) => setServerForm((f) => ({ ...f, name: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              placeholder="Username"
+              value={serverForm.username}
+              onChange={(e) => setServerForm((f) => ({ ...f, username: e.target.value }))}
+            />
+            <input
+              className="settings-input"
+              type="password"
+              placeholder="Password"
+              value={serverForm.password}
+              onChange={(e) => setServerForm((f) => ({ ...f, password: e.target.value }))}
+              onKeyDown={(e) => e.key === "Enter" && addServer()}
+            />
+            {serverError && <div className="error">{serverError}</div>}
+            <div className="player-dialog-actions">
+              <button
+                className="btn btn-secondary"
+                style={{ width: "auto" }}
+                onClick={() => {
+                  setAddServerOpen(false);
+                  setServerError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ width: "auto" }}
+                onClick={addServer}
+                disabled={serverBusy || !serverForm.url.trim() || !serverForm.username.trim() || !serverForm.password}
+              >
+                {serverBusy ? "Connecting…" : "Connect server"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="btn btn-secondary" style={{ width: "auto", marginTop: "0.4rem" }} onClick={() => setAddServerOpen(true)}>
+            Add a server
+          </button>
+        )}
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section-head">
+          <h2 className="settings-section-title">Codex sync</h2>
+          <button
+            className="settings-info-toggle"
+            onClick={() => setCodexInfoOpen((v) => !v)}
+            aria-expanded={codexInfoOpen}
+            aria-label="What is Codex sync?"
+            title="What is Codex sync?"
+          >
+            ⓘ
+          </button>
+        </div>
+        {/* The wordy explanation is tucked behind the ⓘ — the default view is
+            just a status, per the "just a connected" ask. */}
+        {codexInfoOpen && (
+          <p className="settings-help">
+            When you listen, audex-web sends your position to Codex right away (via its Audiobookshelf webhook) so it
+            doesn't wait for Codex's periodic sync. Create the token in Codex → Settings → API Keys.
+          </p>
+        )}
         {!me.codexConfigured ? (
           <p className="settings-help">This server hasn't been set up with a Codex instance.</p>
         ) : me.codexLinked ? (
           <div className="settings-row">
             <div>
               <div className="settings-row-label">Codex</div>
-              <div className="settings-row-sub">Linked</div>
             </div>
-            <button className="btn btn-secondary" style={{ width: "auto" }} onClick={unlinkCodex} disabled={codexBusy}>
+            <span className="tag ok">Connected</span>
+            <button className="btn btn-secondary" style={{ width: "auto", marginLeft: "0.6rem" }} onClick={unlinkCodex} disabled={codexBusy}>
               Unlink
             </button>
           </div>
@@ -173,10 +389,8 @@ export default function Settings() {
           <div>
             <div className="settings-row-label">audex-web</div>
             <div className="settings-row-sub">
-              {updateCheck ? `v${updateCheck.currentVersion}` : "…"} ·{" "}
-              <a href="/CHANGELOG.md" target="_blank" rel="noreferrer">
-                Changelog
-              </a>
+              {currentVersion ? `v${currentVersion}` : "…"}
+              {currentEntry?.date && ` · Updated ${currentEntry.date}`}
             </div>
           </div>
           {!updateCapable ? (
@@ -191,16 +405,44 @@ export default function Settings() {
             <span className="settings-row-sub">Up to date</span>
           )}
         </div>
-        {/* Only shown once there's actually something to update to — the
-            version number + what's in it, right under the button, per the
-            explicit ask. */}
-        {updateCheck?.updateAvailable && updateCheck.changelogEntry && (
-          <p className="settings-help settings-update-preview">
-            <strong>v{updateCheck.latestVersion}</strong>
-            {"\n"}
-            {updateCheck.changelogEntry}
-          </p>
+
+        {/* This build's own notes. */}
+        {currentEntry?.body && (
+          <div className="settings-changelog-block">
+            <div className="settings-changelog-ver">What's in v{currentEntry.version}</div>
+            <p className="settings-help settings-changelog-body">{currentEntry.body}</p>
+          </div>
         )}
+
+        {/* The next release waiting to be installed — name + notes, right here. */}
+        {updateCheck?.updateAvailable && updateCheck.changelogEntry && (
+          <div className="settings-changelog-block settings-changelog-next">
+            <div className="settings-changelog-ver">Next: v{updateCheck.latestVersion}</div>
+            <p className="settings-help settings-changelog-body">{updateCheck.changelogEntry}</p>
+          </div>
+        )}
+
+        {changelog && changelog.length > 0 && (
+          <>
+            <button className="settings-link-btn" onClick={() => setChangelogOpen((v) => !v)} aria-expanded={changelogOpen}>
+              {changelogOpen ? "Hide full changelog" : "Expand to full changelog"}
+            </button>
+            {changelogOpen && (
+              <div className="settings-changelog-full">
+                {changelog.map((e) => (
+                  <div key={e.version} className="settings-changelog-block">
+                    <div className="settings-changelog-ver">
+                      v{e.version}
+                      {e.date && <span className="settings-changelog-date"> · {e.date}</span>}
+                    </div>
+                    <p className="settings-help settings-changelog-body">{e.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
         {updateMessage && <p className="settings-help">{updateMessage}</p>}
         {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
       </section>

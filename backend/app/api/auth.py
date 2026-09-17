@@ -25,7 +25,7 @@ from app.api.deps import get_current_identity
 from app.core import abs_client, codex_client
 from app.core.abs_client import AbsAuthError
 from app.core.config import oidc_active, settings
-from app.core.database import Identity, WebSession, get_db
+from app.core.database import AbsServer, Identity, WebSession, get_db
 from app.core.security import decrypt_value, encrypt_value, new_session_id
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -67,7 +67,7 @@ async def login_with_abs(body: AbsLoginRequest, response: Response, db: AsyncSes
     updates) an Identity carrying that ABS account and starts a session — one step
     does both what SSO+link would do in two."""
     try:
-        abs_user = await abs_client.login(body.username, body.password)
+        abs_user = await abs_client.login(settings.ABS_URL, body.username, body.password)
     except AbsAuthError as e:
         raise HTTPException(401, str(e))
 
@@ -122,7 +122,7 @@ async def link_abs(
     already-signed-in identity so audex-web can act on your library. Never asked again
     once linked."""
     try:
-        abs_user = await abs_client.login(body.username, body.password)
+        abs_user = await abs_client.login(settings.ABS_URL, body.username, body.password)
     except AbsAuthError as e:
         raise HTTPException(401, str(e))
     identity.abs_user_id = str(abs_user["id"])
@@ -162,6 +162,113 @@ async def link_codex(
 async def unlink_codex(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
     identity.codex_token_encrypted = None
     await db.commit()
+    return {"ok": True}
+
+
+# ─── Additional Audiobookshelf servers ───────────────────────────────────────
+# The deploy's configured ABS_URL is the "primary" connection (its token lives
+# on the Identity). Beyond that, a person can connect extra servers here — each
+# its own box, url + credentials — and the library views combine them, the way
+# the mobile app syncs every enabled server. See app/api/connections.py.
+
+def _host_label(base_url: str) -> str:
+    return urlparse(base_url).netloc or base_url
+
+
+@router.get("/abs/servers")
+async def list_abs_servers(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
+    """Every connected ABS server, primary first. The primary carries key ""
+    and can't be removed here (it's the deploy's own ABS_URL, managed by
+    sign-in/out); additional ones carry their row id as key."""
+    out = []
+    if identity.abs_token_encrypted and settings.ABS_URL:
+        out.append({
+            "key": "",
+            "name": _host_label(settings.ABS_URL),
+            "url": settings.ABS_URL.rstrip("/"),
+            "username": identity.abs_username,
+            "primary": True,
+        })
+    rows = (
+        await db.execute(
+            select(AbsServer).where(AbsServer.identity_id == identity.id).order_by(AbsServer.id)
+        )
+    ).scalars().all()
+    for r in rows:
+        out.append({
+            "key": str(r.id),
+            "name": r.name or _host_label(r.base_url),
+            "url": r.base_url.rstrip("/"),
+            "username": r.abs_username,
+            "primary": False,
+        })
+    return out
+
+
+class AddAbsServerRequest(BaseModel):
+    url: str
+    username: str
+    password: str
+    name: str | None = None
+
+
+@router.post("/abs/servers")
+async def add_abs_server(
+    body: AddAbsServerRequest,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Connect another Audiobookshelf server: its credentials are verified with
+    a real login before the token is stored, so a bad url/password fails here
+    rather than silently dropping that server out of the combined library."""
+    url = body.url.strip().rstrip("/")
+    if not url:
+        raise HTTPException(400, "Enter the Audiobookshelf server URL.")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(400, "The server URL must start with http:// or https://.")
+    # Already the primary, or already added? Point them at what's there rather
+    # than stacking a duplicate connection.
+    if settings.ABS_URL and url == settings.ABS_URL.rstrip("/"):
+        raise HTTPException(400, "That's this deploy's main Audiobookshelf server — it's already connected.")
+    existing = (
+        await db.execute(
+            select(AbsServer).where(AbsServer.identity_id == identity.id, AbsServer.base_url == url)
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(400, "That server is already connected.")
+    try:
+        abs_user = await abs_client.login(url, body.username, body.password)
+    except AbsAuthError as e:
+        raise HTTPException(401, str(e))
+    row = AbsServer(
+        identity_id=identity.id,
+        name=(body.name or "").strip() or None,
+        base_url=url,
+        abs_user_id=str(abs_user["id"]),
+        abs_username=abs_user.get("username"),
+        token_encrypted=encrypt_value(abs_user["token"]),
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {"ok": True, "key": str(row.id), "name": row.name or _host_label(url), "username": row.abs_username}
+
+
+@router.delete("/abs/servers/{server_id}")
+async def remove_abs_server(
+    server_id: int,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    row = (
+        await db.execute(
+            select(AbsServer).where(AbsServer.id == server_id, AbsServer.identity_id == identity.id)
+        )
+    ).scalar_one_or_none()
+    if row:
+        await db.delete(row)
+        await db.commit()
     return {"ok": True}
 
 
