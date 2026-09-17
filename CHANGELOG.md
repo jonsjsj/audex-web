@@ -7,6 +7,18 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.2] - 2026-09-17
+
+### Fixed
+- **Self-update now actually swaps the container.** The updater's helper uses
+  the `curlimages/curl` image, which runs as a non-root user (UID 100) that
+  can't open the Docker socket (`root:docker`, mode 660) — so every Docker API
+  call from the helper failed. The old `curl -s` hid this (the button silently
+  did nothing); 0.4.1's error reporting surfaced it as "Update failed while
+  trying to stop." The helper now runs as root (same privilege the app
+  container already uses for the socket), so the stop/remove/recreate/start
+  sequence completes.
+
 ## [0.4.1] - 2026-09-17
 
 ### Fixed

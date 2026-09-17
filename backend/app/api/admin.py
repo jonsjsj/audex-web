@@ -248,6 +248,13 @@ async def trigger_update(identity=Depends(get_current_identity)):
             helper_binds.append(f"{data_source}:{settings.DATA_DIR}")
         helper_body = {
             "Image": "curlimages/curl:latest",
+            # Run as root: curlimages/curl defaults to the non-root "curl" user
+            # (UID 100), which can't open the Docker socket (root:docker, mode
+            # 660) — so EVERY socket call failed. The old `curl -s` swallowed
+            # that (the button silently no-opped); this is the actual reason
+            # self-update never worked. The app container already runs as root
+            # to use the same socket, so this is no extra privilege.
+            "User": "0",
             "Env": [f"SPEC={json.dumps(spec)}"],
             "Cmd": ["sh", "-c", script],
             "HostConfig": {"Binds": helper_binds, "AutoRemove": True},
