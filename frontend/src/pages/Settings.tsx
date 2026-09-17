@@ -99,17 +99,63 @@ export default function Settings() {
 
   // Rebuilds itself from the freshly-pulled GHCR image (see
   // backend/app/api/admin.py) — this page WILL go offline for a few seconds
-  // partway through, that's expected, not a failure.
+  // partway through, that's expected, not a failure. The pull now happens
+  // server-side before this returns, so a pull failure (private package, bad
+  // tag, no network) throws here with a real reason instead of silently
+  // no-opping; after that we poll for the container to come back on the new
+  // version, or for the updater to record which swap step failed.
   async function triggerUpdate() {
     setUpdating(true);
     setUpdateError(null);
+    setUpdateMessage(null);
+    let res: { message: string };
     try {
-      const res = await api.triggerUpdate();
-      setUpdateMessage(res.message);
+      res = await api.triggerUpdate();
     } catch (e) {
       setUpdateError(e instanceof Error ? e.message : "Couldn't start the update.");
       setUpdating(false);
+      return;
     }
+    setUpdateMessage(`${res.message} Watching for it to come back…`);
+
+    const target = updateCheck?.latestVersion ?? null;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 40; i++) {
+      await sleep(3000);
+      // Did the new version come up? (Fetches throw while it's mid-restart —
+      // that's expected, keep waiting.)
+      try {
+        const h = await api.health();
+        if (target && h.version === target) {
+          setUpdateMessage(`Updated to v${target} ✓ — reload the page to use it.`);
+          setUpdating(false);
+          return;
+        }
+      } catch {
+        /* server restarting — ignore and keep polling */
+      }
+      // Did the updater record a failed swap step?
+      try {
+        const s = await api.updateStatus();
+        if (s.state === "failed") {
+          setUpdateError(
+            `Update failed while trying to ${s.step ?? "swap the container"}. ` +
+              `The app is on the old version (or your server needs a look).`,
+          );
+          setUpdating(false);
+          return;
+        }
+        if (s.state === "success" && !target) {
+          setUpdateMessage("Update finished ✓ — reload the page.");
+          setUpdating(false);
+          return;
+        }
+      } catch {
+        /* status not readable (server down mid-swap) — ignore */
+      }
+    }
+    setUpdateMessage("Couldn't confirm the update automatically — reload the page to check the version.");
+    setUpdating(false);
   }
 
   async function addServer() {
