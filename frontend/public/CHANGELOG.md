@@ -7,6 +7,20 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.4.5] - 2026-09-17
+
+### Fixed
+- **The Reader loaded chapter content but never showed it** — stuck on
+  "Loading…" forever, right after the 0.4.4 crash fix. Our EPUB manifest's
+  `self` link was a bare path (`/api/read/{id}/manifest`), not an absolute
+  URL; `@readium/navigator` feeds that straight into each reading iframe's
+  Content-Security-Policy as an allowed domain, and a relative value isn't
+  valid there — the browser silently drops it, which starves the policy
+  down to `blob:`/inline-only and leaves every chapter frame unable to
+  reveal itself. The manifest endpoint now returns a proper absolute URL.
+  This was very likely broken for every book, not just freshly-opened
+  ones — the 0.4.4 crash just meant nobody got far enough to hit it.
+
 ## [0.4.4] - 2026-09-17
 
 ### Fixed
