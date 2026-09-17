@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, Book } from "../api/client";
 import { useShell } from "../components/Shell";
+import { yearOf } from "../lib/groupSort";
 
 // A book you own but haven't opened yet — the "unread" shelf. Started-and-
 // unfinished books belong to "In progress", finished ones to neither.
@@ -28,10 +29,11 @@ function isContinuable(b: Book): boolean {
 
 const CONTINUE_LIMIT = 6;
 
-type SortKey = "title" | "author" | "added" | "duration" | "progress";
+type SortKey = "title" | "author" | "released" | "added" | "duration" | "progress";
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "title", label: "Title" },
   { key: "author", label: "Author" },
+  { key: "released", label: "Release date" },
   { key: "added", label: "Recently added" },
   { key: "duration", label: "Duration" },
   { key: "progress", label: "Progress" },
@@ -73,6 +75,8 @@ function sortBooks(books: Book[], key: SortKey): Book[] {
   switch (key) {
     case "author":
       return arr.sort((a, b) => (a.author ?? "").localeCompare(b.author ?? "") || a.title.localeCompare(b.title));
+    case "released":
+      return arr.sort((a, b) => yearOf(b) - yearOf(a) || a.title.localeCompare(b.title));
     case "added":
       return arr.sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0));
     case "duration":

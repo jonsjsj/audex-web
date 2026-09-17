@@ -63,6 +63,7 @@ export interface Book {
   ebookProgress: number; // 0..1, raw ABS ebook progress
   audioTimeS: number; // raw ABS audio position, for mapping into ebook progression
   addedAt: number | null; // epoch ms — for "date added" sort
+  publishedYear: string | null; // e.g. "2013" — for "Released" sort
 }
 
 export interface BookDetail extends Book {
@@ -70,7 +71,6 @@ export interface BookDetail extends Book {
   description: string | null;
   narrator: string | null;
   publisher: string | null;
-  publishedYear: string | null;
   genres: string[];
   language: string | null;
   isbn: string | null;

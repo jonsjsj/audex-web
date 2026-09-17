@@ -339,6 +339,14 @@ export default function Reader() {
           {chapterTitle && <span className="reader-chapter-title"> · {chapterTitle}</span>}
         </div>
         <div className="reader-head-right">
+          {hasAudio && (
+            <button
+              className="reader-listen-btn"
+              onClick={() => (readAlong.map ? jumpToAudio() : navigate(`/play/${itemId}`))}
+            >
+              🎧 Listen
+            </button>
+          )}
           <button className="reader-font-btn" onClick={() => changeFontSize(-1)} aria-label="Smaller text" disabled={fontSizeIdx === 0}>
             A-
           </button>
@@ -374,28 +382,18 @@ export default function Reader() {
 
       {resumeNotice && <p className="reader-resume-notice">{resumeNotice}</p>}
 
-      {hasAudio && (
+      {hasAudio && !readAlong.map && (
+        // The switch-to-listening action itself now lives in the header
+        // (always visible, no scrolling needed) — this block is just the
+        // read-along build prompt/status, which only matters pre-map.
         <div className="reader-readalong">
-          {readAlong.map ? (
-            <button className="reader-readalong-jump" onClick={jumpToAudio}>
-              Jump to audio ↦
-            </button>
+          {readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+            <span className="reader-readalong-status">Building word sync…</span>
           ) : (
-            // No read-along map yet (or none configured) — a plain format
-            // switch shouldn't have to wait on that; it just opens the
-            // player at wherever your own listening position last was.
-            <button className="reader-readalong-jump" onClick={() => navigate(`/play/${itemId}`)}>
-              Listen to this book ↦
+            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
+              Build read-along
             </button>
           )}
-          {!readAlong.map &&
-            (readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
-              <span className="reader-readalong-status">Building word sync…</span>
-            ) : (
-              <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
-                Build read-along
-              </button>
-            ))}
           {readAlong.error && <span className="reader-readalong-status">{readAlong.error}</span>}
         </div>
       )}

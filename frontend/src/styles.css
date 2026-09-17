@@ -960,6 +960,24 @@ input:focus {
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
 }
+.player-format-switch {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+  color: var(--surface);
+  backdrop-filter: blur(2px);
+  border: none;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+}
+.player-format-switch:hover {
+  background: color-mix(in oklab, var(--ink) 75%, transparent);
+}
 .player-hero-text {
   position: absolute;
   left: 1.5rem;
@@ -1439,6 +1457,21 @@ input:focus {
   font-size: 0.78rem;
   padding: 0.3rem 0.55rem;
   cursor: pointer;
+}
+.reader-listen-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #201400;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reader-listen-btn:hover {
+  opacity: 0.9;
 }
 .reader-font-btn:disabled {
   opacity: 0.4;

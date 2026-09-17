@@ -72,6 +72,7 @@ def _book_summary(conn: AbsConn, item: dict, progress: dict | None = None) -> di
         "ebookProgress": float(p.get("ebookProgress") or 0),
         "audioTimeS": float(p.get("currentTime") or 0),
         "addedAt": item.get("addedAt"),  # epoch ms — for "date added" sort
+        "publishedYear": meta.get("publishedYear"),  # string, e.g. "2013" — for "Released" sort
     }
 
 
@@ -85,7 +86,6 @@ def _book_detail_extra(item: dict) -> dict:
         "description": meta.get("description"),
         "narrator": ", ".join(narrators) if narrators else None,
         "publisher": meta.get("publisher"),
-        "publishedYear": meta.get("publishedYear"),
         "genres": meta.get("genres") or [],
         "language": meta.get("language"),
         "isbn": meta.get("isbn"),

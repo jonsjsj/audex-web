@@ -179,6 +179,14 @@ export default function Player() {
         <img className="player-hero-cover" src={book!.coverUrl} alt="" />
         <div className="player-hero-scrim" />
         <span className="player-hero-eyebrow">NOW PLAYING</span>
+        {book!.hasEbook && (
+          <button
+            className="player-format-switch"
+            onClick={() => (readAlong.map ? playback.jumpToText() : navigate(`/read/${urlItemId}`))}
+          >
+            📖 Read
+          </button>
+        )}
         <div className="player-hero-text">
           <h1 className="player-title">{book!.title}</h1>
           <div className="player-byline">
@@ -297,28 +305,21 @@ export default function Player() {
         </button>
       </div>
 
-      {book!.hasEbook && (
+      {book!.hasEbook && !readAlong.map && (
+        // The switch-to-reading action itself now lives in the hero (always
+        // visible, no scrolling needed) — this block is just the read-along
+        // build prompt/status, which only matters pre-map.
         <div className="player-readalong">
-          {readAlong.map ? (
-            <button className="player-readalong-jump" onClick={playback.jumpToText}>
-              Jump to text ↦
-            </button>
+          {readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
+            <div className="player-readalong-status">
+              <span>Building word sync…</span>
+              {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
+            </div>
           ) : (
-            <button className="player-readalong-jump" onClick={() => navigate(`/read/${urlItemId}`)}>
-              Read this book ↦
+            <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
+              Build read-along
             </button>
           )}
-          {!readAlong.map &&
-            (readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
-              <div className="player-readalong-status">
-                <span>Building word sync…</span>
-                {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
-              </div>
-            ) : (
-              <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
-                Build read-along
-              </button>
-            ))}
           {readAlong.error && (
             <p className="error" style={{ margin: 0 }}>
               {readAlong.error}

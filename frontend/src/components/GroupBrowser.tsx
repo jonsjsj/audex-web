@@ -3,6 +3,12 @@ import { BookGroup } from "../api/client";
 
 type ViewMode = "grid" | "list";
 
+export interface GroupSort {
+  key: string;
+  label: string;
+  cmp: (a: BookGroup, b: BookGroup) => number;
+}
+
 /** Filters groups by the shared search box — matches a group's own name or
  *  any of its books' title/author, so searching "sanderson" finds the author
  *  tile and searching a book title finds the series/narrator it belongs to. */
@@ -60,27 +66,35 @@ export default function GroupBrowser({
   title,
   groups,
   storageKey,
+  sorts,
   isPerson = false,
   search = "",
   onOpen,
 }: {
   title: string;
   groups: BookGroup[];
-  storageKey: string; // "series" | "authors" | "narrators" — persists the grid/list choice per page
+  storageKey: string; // "series" | "authors" | "narrators" — persists the grid/list choice + sort per page
+  sorts: GroupSort[]; // page-specific — a series has "an author", an authors list doesn't
   isPerson?: boolean; // true for authors/narrators — governs the never-a-book-cover rule above
   search?: string; // the shell's shared search box
   onOpen: (name: string) => void;
 }) {
   const [view, setView] = useState<ViewMode>("grid");
-  const shown = useMemo(() => matchGroups(groups, search), [groups, search]);
+  const [sortKey, setSortKey] = useState(sorts[0].key);
+  const matched = useMemo(() => matchGroups(groups, search), [groups, search]);
+  const sortCmp = sorts.find((s) => s.key === sortKey)?.cmp ?? sorts[0].cmp;
+  const shown = useMemo(() => [...matched].sort(sortCmp), [matched, sortCmp]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(`audexweb.groupView.${storageKey}`);
       if (saved === "grid" || saved === "list") setView(saved);
+      const savedSort = localStorage.getItem(`audexweb.groupSort.${storageKey}`);
+      if (savedSort && sorts.some((s) => s.key === savedSort)) setSortKey(savedSort);
     } catch {
       // private-browsing / storage-blocked — just keep the default
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
   function changeView(v: ViewMode) {
@@ -92,10 +106,26 @@ export default function GroupBrowser({
     }
   }
 
+  function changeSort(k: string) {
+    setSortKey(k);
+    try {
+      localStorage.setItem(`audexweb.groupSort.${storageKey}`, k);
+    } catch {
+      // per-viewer convenience only — fine if it doesn't stick
+    }
+  }
+
   return (
     <div className="lib">
       <header className="lib-head">
         <h2 className="group-page-title">{title}</h2>
+        <select className="lib-sort" value={sortKey} onChange={(e) => changeSort(e.target.value)} aria-label="Sort by">
+          {sorts.map((s) => (
+            <option key={s.key} value={s.key}>
+              Sort: {s.label}
+            </option>
+          ))}
+        </select>
         <div className="group-view-toggle" role="group" aria-label="View">
           <button className={view === "grid" ? "active" : ""} onClick={() => changeView("grid")} aria-label="Grid view">
             ⊞

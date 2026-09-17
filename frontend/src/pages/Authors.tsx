@@ -2,7 +2,14 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, BookGroup } from "../api/client";
 import { useShell } from "../components/Shell";
-import GroupBrowser from "../components/GroupBrowser";
+import GroupBrowser, { GroupSort } from "../components/GroupBrowser";
+import { countSort, latestSort, nameSort } from "../lib/groupSort";
+
+const SORTS: GroupSort[] = [
+  { key: "name", label: "Name", cmp: nameSort },
+  { key: "latest", label: "Latest release", cmp: latestSort },
+  { key: "count", label: "Most books", cmp: countSort },
+];
 
 export default function Authors() {
   const navigate = useNavigate();
@@ -28,6 +35,7 @@ export default function Authors() {
       title="Authors"
       groups={groups}
       storageKey="authors"
+      sorts={SORTS}
       isPerson
       search={search}
       onOpen={(name) => navigate(`/authors/${encodeURIComponent(name)}`)}
