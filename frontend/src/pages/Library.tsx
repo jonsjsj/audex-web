@@ -59,7 +59,9 @@ function filterBooks(books: Book[], key: FilterKey): Book[] {
     case "ebook":
       return books.filter((b) => b.hasEbook);
     case "both":
-      return books.filter((b) => b.numAudioFiles > 0 && b.hasEbook);
+      // A pairedItemId (see BookCard) means this item effectively has both
+      // formats even if only one is native to it.
+      return books.filter((b) => (b.numAudioFiles > 0 || b.pairedItemId) && (b.hasEbook || b.pairedItemId));
     case "progress":
       return books.filter(isContinuable);
     case "unread":
