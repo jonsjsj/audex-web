@@ -7,6 +7,23 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.5.0] - 2026-09-18
+
+### Added
+- **Cross-item format pairing.** Audiobookshelf sometimes catalogs a book's
+  audiobook and ebook as two separate library items instead of one with
+  both files — previously each showed only its own format, with no way to
+  toggle and inconsistent icons. Now matched using the same identity
+  cascade proven in the Audex mobile app's catalog engine (ASIN → ISBN-13
+  → fuzzy title+author), so a book split like this gets a real Listen/Read
+  toggle, matching format icons on both library cards, and a shared
+  read-along/word-align build between the two.
+
+### Known limits
+- Listening/reading progress still only reflects the item you're currently
+  on — a book you've made progress on via its paired edition may show
+  "Listen"/"Read" instead of "Resume listening"/"Resume reading".
+
 ## [0.4.7] - 2026-09-17
 
 ### Added
