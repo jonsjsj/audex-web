@@ -64,6 +64,12 @@ export interface Book {
   audioTimeS: number; // raw ABS audio position, for mapping into ebook progression
   addedAt: number | null; // epoch ms — for "date added" sort
   publishedYear: string | null; // e.g. "2013" — for "Released" sort
+  // A DIFFERENT library item that's the same work in the complementary
+  // format — ABS sometimes catalogs an audiobook and its ebook as two
+  // separate items (even across libraries) instead of one with both files.
+  // null when this item already has both formats natively, or no match
+  // was found.
+  pairedItemId: string | null;
 }
 
 export interface BookDetail extends Book {

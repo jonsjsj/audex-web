@@ -62,6 +62,12 @@ export default function BookDetail() {
 
   const hasAudio = book.numAudioFiles > 0;
   const duration = formatDuration(book.durationS);
+  // ABS sometimes catalogs a book's audiobook and ebook as two separate
+  // library items instead of one with both files (see pairedItemId's own
+  // doc comment) — when this item is missing a format natively but has a
+  // paired item, that pair supplies it.
+  const audioTargetId = hasAudio ? book.id : book.pairedItemId;
+  const ebookTargetId = book.hasEbook ? book.id : book.pairedItemId;
 
   return (
     <div className="lib book-detail">
@@ -120,13 +126,13 @@ export default function BookDetail() {
           )}
 
           <div className="book-detail-actions">
-            {hasAudio && (
-              <button className="btn btn-primary" style={{ width: "auto" }} onClick={() => navigate(`/play/${book.id}`)}>
+            {audioTargetId && (
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={() => navigate(`/play/${audioTargetId}`)}>
                 {book.audioProgress > 0.001 ? "Resume listening" : "Listen"}
               </button>
             )}
-            {book.hasEbook && (
-              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => navigate(`/read/${book.id}`)}>
+            {ebookTargetId && (
+              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => navigate(`/read/${ebookTargetId}`)}>
                 {book.ebookProgress > 0.001 ? "Resume reading" : "Read"}
               </button>
             )}

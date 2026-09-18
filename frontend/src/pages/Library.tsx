@@ -129,9 +129,16 @@ export default function Library() {
   // Fire-and-forget: no optimistic flip to "available" (it isn't yet — this
   // only starts the build), and no per-card loading state to keep simple —
   // re-visiting the library page after a while picks up the finished result
-  // via the bulk-status fetch above.
-  function requestAlign(itemId: string) {
-    api.readAlongBuild(itemId).catch(() => {});
+  // via the bulk-status fetch above. The align gateway keys status by the
+  // AUDIO item's id (readalong.py), so a request from an ebook-only card
+  // (paired with a separate audio item — see pairedItemId) has to build
+  // against ITS paired audio item, telling it which ebook to use.
+  function requestAlign(book: Book) {
+    if (book.numAudioFiles > 0) {
+      api.readAlongBuild(book.id, book.hasEbook ? undefined : book.pairedItemId ?? undefined).catch(() => {});
+    } else if (book.pairedItemId) {
+      api.readAlongBuild(book.pairedItemId, book.id).catch(() => {});
+    }
   }
 
   const continueBooks = useMemo(() => {
@@ -229,10 +236,17 @@ export function BookCard({
   onNavigate: (href: string) => void;
   quickResume?: boolean;
   aligned?: boolean;
-  onRequestAlign?: (itemId: string) => void;
+  onRequestAlign?: (book: Book) => void;
 }) {
   const hasAudio = b.numAudioFiles > 0;
-  const bothFormats = hasAudio && b.hasEbook;
+  // ABS sometimes catalogs a book's audiobook and ebook as two separate
+  // library items instead of one with both files — pairedItemId (set when
+  // one was found, see catalog_match.py) means this card's book effectively
+  // has both formats even though only one is native to THIS item.
+  const hasAudioEffective = hasAudio || !!b.pairedItemId;
+  const hasEbookEffective = b.hasEbook || !!b.pairedItemId;
+  const bothFormats = hasAudioEffective && hasEbookEffective;
+  const ebookTargetId = b.hasEbook ? b.id : b.pairedItemId;
   const primaryHref = quickResume ? (hasAudio ? `/play/${b.id}` : `/read/${b.id}`) : `/book/${b.id}`;
   const showProgress = b.progress > 0.001 && !b.isFinished;
   return (
@@ -254,10 +268,10 @@ export function BookCard({
         {b.author && <div className="lib-author">{b.author}</div>}
         {b.series && <div className="lib-series">{b.series}</div>}
         <div className="lib-format-icons" aria-hidden>
-          <span className={`lib-format-icon ${hasAudio ? "on" : ""}`} title="Audiobook">
+          <span className={`lib-format-icon ${hasAudioEffective ? "on" : ""}`} title="Audiobook">
             🎧
           </span>
-          <span className={`lib-format-icon ${b.hasEbook ? "on" : ""}`} title="Ebook">
+          <span className={`lib-format-icon ${hasEbookEffective ? "on" : ""}`} title="Ebook">
             📖
           </span>
           {bothFormats && (
@@ -268,8 +282,8 @@ export function BookCard({
         </div>
         {formatDuration(b.durationS) && <div className="lib-duration">{formatDuration(b.durationS)}</div>}
       </button>
-      {quickResume && bothFormats && (
-        <button className="lib-read-badge" aria-label={`Read ${b.title}`} onClick={() => onNavigate(`/read/${b.id}`)}>
+      {quickResume && bothFormats && ebookTargetId && (
+        <button className="lib-read-badge" aria-label={`Read ${b.title}`} onClick={() => onNavigate(`/read/${ebookTargetId}`)}>
           Read
         </button>
       )}
@@ -278,7 +292,7 @@ export function BookCard({
           className="lib-align-badge"
           aria-label={`Request read-along for ${b.title}`}
           title="Request read-along"
-          onClick={() => onRequestAlign(b.id)}
+          onClick={() => onRequestAlign(b)}
         >
           +
         </button>

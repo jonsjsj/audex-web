@@ -61,7 +61,13 @@ export default function Reader() {
 
   // Cross-format jump (docs/SYNC_API.md §3) — gated on this item also having
   // audio, same reasoning as Player.tsx's own gate on hasEbook.
-  const readAlong = useReadAlong(itemId, hasAudio);
+  // ABS sometimes catalogs this book's audiobook and ebook as two separate
+  // library items instead of one with both files (pairedItemId — see
+  // catalog_match.py). The align gateway keys status/maps by the AUDIO
+  // item's id, so when this ebook item has no native audio, the anchor
+  // shifts to its paired audio item instead of itself.
+  const readAlongAnchorId = hasAudio ? itemId : bookDetail?.pairedItemId ?? undefined;
+  const readAlong = useReadAlong(readAlongAnchorId, hasAudio || !!bookDetail?.pairedItemId);
 
   useEffect(() => {
     if (!itemId || !containerRef.current) return;
@@ -280,7 +286,8 @@ export default function Reader() {
     if (!itemId || !readAlong.map) return;
     const t = timeAtProgression(readAlong.map, progressionRef.current);
     if (t === null) return;
-    navigate(`/play/${itemId}?atTime=${t}`);
+    const playItemId = hasAudio ? itemId : bookDetail?.pairedItemId ?? itemId;
+    navigate(`/play/${playItemId}?atTime=${t}`);
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -339,10 +346,12 @@ export default function Reader() {
           {chapterTitle && <span className="reader-chapter-title"> · {chapterTitle}</span>}
         </div>
         <div className="reader-head-right">
-          {hasAudio && (
+          {(hasAudio || bookDetail?.pairedItemId) && (
             <button
               className="reader-listen-btn"
-              onClick={() => (readAlong.map ? jumpToAudio() : navigate(`/play/${itemId}`))}
+              onClick={() =>
+                readAlong.map ? jumpToAudio() : navigate(`/play/${hasAudio ? itemId : bookDetail!.pairedItemId}`)
+              }
             >
               🎧 Listen
             </button>
@@ -382,7 +391,7 @@ export default function Reader() {
 
       {resumeNotice && <p className="reader-resume-notice">{resumeNotice}</p>}
 
-      {hasAudio && !readAlong.map && (
+      {(hasAudio || bookDetail?.pairedItemId) && !readAlong.map && (
         // The switch-to-listening action itself now lives in the header
         // (always visible, no scrolling needed) — this block is just the
         // read-along build prompt/status, which only matters pre-map.
@@ -390,7 +399,7 @@ export default function Reader() {
           {readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
             <span className="reader-readalong-status">Building word sync…</span>
           ) : (
-            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild()}>
+            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild(hasAudio ? undefined : itemId)}>
               Build read-along
             </button>
           )}

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import connections_for_library, resolve
 from app.api.deps import get_current_identity
+from app.api.library import _iter_books_paired
 from app.core import abs_client
 from app.core.abs_client import AbsError
 from app.core.config import align_gateway_url, settings
@@ -40,10 +41,10 @@ async def bulk_status(
     db: AsyncSession = Depends(get_db),
 ):
     """Read-along availability for every book in a library that could ever
-    have one (both an audio and an ebook edition on the SAME item) — powers
-    the library grid's third icon (docs/SYNC_API.md's "same item" case;
-    cross-item pairing isn't attempted, same scope limit as the rest of this
-    phase). Not configured, or no eligible books → {}, not an error.
+    have one — either a single item with both an audio and an ebook edition,
+    or a pairedItemId cross-item match (see catalog_match.py) — powers the
+    library grid's third icon. Not configured, or no eligible books → {},
+    not an error.
 
     Only the PRIMARY connection is queried: Codex computes the book-key from
     its own single ABS connection, so read-along only exists for that server —
@@ -71,7 +72,23 @@ async def bulk_status(
                 ]
         except AbsError:
             return {}
-    if not eligible:
+
+    # Cross-item pairs — the align gateway keys status by the AUDIO item's
+    # id (same anchor /build already uses), so a paired ebook-only item's
+    # status is really its paired audio item's status. Primary-server only,
+    # same reasoning as above (serverKey == "" tags a primary item).
+    ebook_to_audio: dict[str, str] = {}
+    try:
+        for _conn, _item, book in await _iter_books_paired(identity, db, library_id):
+            if book["serverKey"] or not book["pairedItemId"]:
+                continue
+            if book["hasEbook"] and book["numAudioFiles"] == 0:
+                ebook_to_audio[book["id"]] = book["pairedItemId"]
+    except HTTPException:
+        pass
+
+    query_ids = set(eligible) | set(ebook_to_audio.values())
+    if not query_ids:
         return {}
 
     # Bounded concurrency — a library with a lot of dual-format books
@@ -89,9 +106,14 @@ async def bulk_status(
                 pass
         return item_id, False
 
-    results = await asyncio.gather(*(_one(i) for i in eligible))
+    results = await asyncio.gather(*(_one(i) for i in query_ids))
     # Primary items are bare-tagged, so their abs id IS their frontend id.
-    return {item_id: available for item_id, available in results}
+    by_audio_id = dict(results)
+    out = {item_id: available for item_id, available in results if item_id in eligible}
+    for ebook_id, audio_id in ebook_to_audio.items():
+        out[ebook_id] = by_audio_id.get(audio_id, False)
+        out[audio_id] = by_audio_id.get(audio_id, False)
+    return out
 
 
 @router.get("/{item_id}/status")

@@ -1,7 +1,12 @@
 """Library browsing — Phase 1. Thin projections over Audiobookshelf's own shapes
 (see abs_client.py's module docstring) rather than a separate catalog graph: that
 richer Authors→Series→Works matching the mobile app does is a later-phase concern
-(§3 in the plan calls this lift "M" on purpose), not a Phase-1 blocker.
+(§3 in the plan calls this lift "M" on purpose), not a Phase-1 blocker. The one
+exception is dual-format edition pairing (catalog_match.py) — ABS sometimes
+catalogs an item's audiobook and ebook as two separate library items instead of
+one with both files, which needs *some* cross-item matching to offer a format
+toggle at all; see that module's docstring for how it's scoped down from the
+mobile app's full graph builder.
 """
 import re
 
@@ -14,6 +19,7 @@ from app.api.connections import AbsConn, connections_for_library, list_connectio
 from app.api.deps import get_current_identity
 from app.core import abs_client
 from app.core.abs_client import AbsError
+from app.core.catalog_match import pair_dual_format
 from app.core.database import Identity, get_db
 
 router = APIRouter(prefix="/api/library", tags=["library"])
@@ -73,6 +79,7 @@ def _book_summary(conn: AbsConn, item: dict, progress: dict | None = None) -> di
         "audioTimeS": float(p.get("currentTime") or 0),
         "addedAt": item.get("addedAt"),  # epoch ms — for "date added" sort
         "publishedYear": meta.get("publishedYear"),  # string, e.g. "2013" — for "Released" sort
+        "pairedItemId": None,  # set by catalog_match.pair_dual_format() via _run_pairing() below
     }
 
 
@@ -213,6 +220,35 @@ async def _iter_books(
     return triples
 
 
+def _run_pairing(triples: list[tuple[AbsConn, dict, dict]]) -> None:
+    entries = [
+        {"book": book, "meta": (item.get("media") or {}).get("metadata") or {}}
+        for _conn, item, book in triples
+    ]
+    pair_dual_format(entries)
+
+
+async def _iter_books_paired(
+    identity: Identity, db: AsyncSession, library_sel: str
+) -> list[tuple[AbsConn, dict, dict]]:
+    """_iter_books(), with pairedItemId resolved against the identity's FULL
+    catalog — a book's other-format edition may live in a library the caller
+    isn't currently browsing (see catalog_match.py). When library_sel is
+    already "all" that's the same fetch, so no second round-trip; otherwise
+    a broader "all libraries" scan finds the pair and its id is copied back
+    onto the (separately fetched) items actually being returned."""
+    triples = await _iter_books(identity, db, library_sel)
+    if library_sel == "all":
+        _run_pairing(triples)
+        return triples
+    all_triples = await _iter_books(identity, db, "all")
+    _run_pairing(all_triples)
+    paired_by_id = {b["id"]: b.get("pairedItemId") for _, _, b in all_triples}
+    for _, _, b in triples:
+        b["pairedItemId"] = paired_by_id.get(b["id"])
+    return triples
+
+
 @router.get("/libraries")
 async def get_libraries(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
     """Every book library across every connected server, ids tagged so the
@@ -249,7 +285,7 @@ async def get_items(
     ABS's own filter query language, which the mobile app doesn't use either.
     `libraryId` may be "all" to combine every book library across every
     connected server into one view."""
-    books = [b for _, _, b in await _iter_books(identity, db, library_id)]
+    books = [b for _, _, b in await _iter_books_paired(identity, db, library_id)]
     if search.strip():
         q = search.strip().lower()
         books = [
@@ -284,6 +320,14 @@ async def get_item(
         for c in media.get("chapters", [])
     ]
     summary.update(_book_detail_extra(item))
+    # Best-effort: a book's other-format edition may be a whole separate
+    # library item (see catalog_match.py) — scan every connected library for
+    # one, but a failure here shouldn't break the detail page over a toggle.
+    try:
+        others = [t for t in await _iter_books(identity, db, "all") if t[2]["id"] != summary["id"]]
+        _run_pairing([*others, (conn, item, summary)])
+    except HTTPException:
+        pass
     return summary
 
 
@@ -298,7 +342,7 @@ async def get_series(
     organizes what's actually in your ABS libraries). `libraryId` may be "all"
     to combine every book library across every connected server."""
     groups: dict[str, list[tuple[float | None, dict]]] = {}
-    for _conn, item, book in await _iter_books(identity, db, library_id):
+    for _conn, item, book in await _iter_books_paired(identity, db, library_id):
         for name, seq in _series_entries(item):
             groups.setdefault(name, []).append((seq, book))
     result = []
@@ -320,7 +364,7 @@ async def get_authors(
     /authors/{id}/image instead of a book-cover stand-in. `libraryId` may be
     "all" to combine every book library across every connected server."""
     groups: dict[str, dict] = {}  # name -> {id, books}
-    for conn, item, book in await _iter_books(identity, db, library_id):
+    for conn, item, book in await _iter_books_paired(identity, db, library_id):
         for name, author_id in _author_entries(item):
             g = groups.setdefault(name, {"id": None, "books": []})
             if author_id and not g["id"]:
@@ -351,7 +395,7 @@ async def get_narrators(
     `libraryId` may be "all" to combine every book library across every
     connected server."""
     groups: dict[str, list[dict]] = {}
-    for _conn, item, book in await _iter_books(identity, db, library_id):
+    for _conn, item, book in await _iter_books_paired(identity, db, library_id):
         for name in _narrator_names(item):
             groups.setdefault(name, []).append(book)
     result = [

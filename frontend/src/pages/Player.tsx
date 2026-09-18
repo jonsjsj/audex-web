@@ -179,10 +179,12 @@ export default function Player() {
         <img className="player-hero-cover" src={book!.coverUrl} alt="" />
         <div className="player-hero-scrim" />
         <span className="player-hero-eyebrow">NOW PLAYING</span>
-        {book!.hasEbook && (
+        {(book!.hasEbook || book!.pairedItemId) && (
           <button
             className="player-format-switch"
-            onClick={() => (readAlong.map ? playback.jumpToText() : navigate(`/read/${urlItemId}`))}
+            onClick={() =>
+              readAlong.map ? playback.jumpToText() : navigate(`/read/${book!.hasEbook ? urlItemId : book!.pairedItemId}`)
+            }
           >
             📖 Read
           </button>
@@ -305,7 +307,7 @@ export default function Player() {
         </button>
       </div>
 
-      {book!.hasEbook && !readAlong.map && (
+      {(book!.hasEbook || book!.pairedItemId) && !readAlong.map && (
         // The switch-to-reading action itself now lives in the hero (always
         // visible, no scrolling needed) — this block is just the read-along
         // build prompt/status, which only matters pre-map.
@@ -316,7 +318,10 @@ export default function Player() {
               {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
             </div>
           ) : (
-            <button className="player-readalong-build" onClick={() => readAlong.requestBuild()}>
+            <button
+              className="player-readalong-build"
+              onClick={() => readAlong.requestBuild(book!.hasEbook ? undefined : book!.pairedItemId ?? undefined)}
+            >
               Build read-along
             </button>
           )}

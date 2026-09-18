@@ -106,7 +106,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
 
-  const readAlong = useReadAlong(itemId ?? undefined, book?.hasEbook ?? false);
+  // Enabled when this item has its own ebook, OR a DIFFERENT item is the
+  // same work's ebook edition (pairedItemId — see catalog_match.py). The
+  // anchor stays THIS (audio) item's id either way — the align gateway
+  // keys status/maps by the audio item, and requestBuild() below passes
+  // pairedItemId as the ebookItemId when there's no native one.
+  const readAlong = useReadAlong(itemId ?? undefined, !!(book?.hasEbook || book?.pairedItemId));
   const explicitJumpRef = useRef(false);
   const autoResumedRef = useRef(false);
   // Guards against a stale response landing after a second play() call (e.g.
@@ -339,7 +344,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (!itemId || !readAlong.map) return;
     const p = progressionAt(readAlong.map, positionRef.current);
     if (p === null) return;
-    navigate(`/read/${itemId}?atProgression=${p}`);
+    // This item's own ebook if it has one, otherwise the paired item that
+    // supplied the ebook side of the read-along map (see pairedItemId).
+    const readItemId = book?.hasEbook ? itemId : book?.pairedItemId ?? itemId;
+    navigate(`/read/${readItemId}?atProgression=${p}`);
   }
 
   function jumpToReadingPosition() {
