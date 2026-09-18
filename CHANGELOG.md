@@ -7,6 +7,13 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.5.1] - 2026-09-18
+
+### Fixed
+- The Library's "Audio + ebook" filter didn't count cross-item pairs (0.5.0)
+  — a paired book showed both format icons on its card but still never
+  matched this filter.
+
 ## [0.5.0] - 2026-09-18
 
 ### Added
