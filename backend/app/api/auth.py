@@ -37,23 +37,33 @@ _oidc_states: dict[str, dict] = {}
 _SESSION_SECONDS = settings.SESSION_DAYS * 86400
 
 
-def _set_session_cookie(response: Response, session_id: str) -> None:
+def _set_session_cookie(response: Response, session_id: str, request: Request) -> None:
+    # SESSION_COOKIE_SECURE is a single deploy-wide flag, but this app is
+    # commonly reachable over BOTH plain-HTTP LAN IP (e.g. http://<host>:8420)
+    # and HTTPS through the public reverse proxy at once. A cookie marked
+    # Secure is silently dropped by the browser on the HTTP path — login
+    # would 200 but never actually persist, "logging in does nothing" from
+    # the LAN address specifically. Decide per-request from the scheme the
+    # BROWSER actually used (X-Forwarded-Proto when behind a proxy, same
+    # reasoning as the read manifest's self_url in read.py) instead.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    secure = settings.SESSION_COOKIE_SECURE and scheme == "https"
     response.set_cookie(
         key=settings.SESSION_COOKIE,
         value=session_id,
         max_age=_SESSION_SECONDS,
         httponly=True,
-        secure=settings.SESSION_COOKIE_SECURE,
+        secure=secure,
         samesite="lax",
         path="/",
     )
 
 
-async def _start_session(db: AsyncSession, identity: Identity, response: Response) -> None:
+async def _start_session(db: AsyncSession, identity: Identity, response: Response, request: Request) -> None:
     session_id = new_session_id()
     db.add(WebSession(id=session_id, identity_id=identity.id, expires_at=time.time() + _SESSION_SECONDS))
     await db.commit()
-    _set_session_cookie(response, session_id)
+    _set_session_cookie(response, session_id, request)
 
 
 class AbsLoginRequest(BaseModel):
@@ -62,7 +72,7 @@ class AbsLoginRequest(BaseModel):
 
 
 @router.post("/login/abs")
-async def login_with_abs(body: AbsLoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
+async def login_with_abs(body: AbsLoginRequest, response: Response, request: Request, db: AsyncSession = Depends(get_db)):
     """Fallback sign-in: authenticate against Audiobookshelf directly. Creates (or
     updates) an Identity carrying that ABS account and starts a session — one step
     does both what SSO+link would do in two."""
@@ -83,7 +93,7 @@ async def login_with_abs(body: AbsLoginRequest, response: Response, db: AsyncSes
     if not identity.display_name:
         identity.display_name = abs_user.get("username")
     await db.flush()
-    await _start_session(db, identity, response)
+    await _start_session(db, identity, response, request)
     return {"ok": True}
 
 
@@ -398,5 +408,5 @@ async def oidc_callback(code: str, state: str, request: Request, db: AsyncSessio
         identity.display_name = identity.display_name or name
 
     response = RedirectResponse(url="/")
-    await _start_session(db, identity, response)
+    await _start_session(db, identity, response, request)
     return response
