@@ -7,6 +7,17 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.5.2] - 2026-09-22
+
+### Fixed
+- **Local (Audiobookshelf username/password) login didn't persist when
+  reached over the direct LAN IP** (http://\<host\>:8420) — the login call
+  itself succeeded, but the session cookie was marked Secure (needed for
+  the public HTTPS domain) and browsers silently drop Secure cookies over
+  plain HTTP, so you'd land right back at the sign-in screen. The cookie
+  now decides Secure per-request from the scheme actually used, so both
+  the HTTPS domain and the plain-HTTP LAN address work.
+
 ## [0.5.1] - 2026-09-18
 
 ### Fixed
