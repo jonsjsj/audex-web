@@ -179,13 +179,46 @@ elapsed time + the audiobook's duration — the align service itself doesn't
 report a percentage, only phases (transcription is real per-chunk progress
 when available).
 
+### Descriptive failures (added 2026-09)
+
+A build that fails partway through — the shared ASR service's GPU context
+going bad, Audiobookshelf rejecting a download, an EPUB with no readable
+text — used to surface as nothing more than `state: "error"`, or even look
+identical to "never tried" (the gateway's job lookup used to explicitly skip
+errored jobs). It's now real, structured information all the way through:
+
+- `status`'s response gets an `error` field, present **only** when
+  `state == "error"`: `{stage, message, hint}`. `stage` is the phase it died
+  in (`downloading`, `extracting`, `transcribing`, `aligning`); `message` is
+  what happened; `hint` is a plain-language next step, written for the person
+  who pressed "Align", not for a log — **show `hint` in the UI**, don't just
+  log it.
+- Pressing "build" again after a failure starts a **fresh** job rather than
+  returning the dead one — an errored job no longer counts as "already
+  running".
+- The align service itself (same shape, for a same-LAN client — see below)
+  exposes the same `error` on `GET /jobs/{jobId}`, plus an `events` array
+  (timestamped: requested → downloaded each file → extracted N characters →
+  transcribed N words → aligned → done/error) and `phaseSeconds` (wall time
+  per phase) — the full "what actually happened and how long each part took"
+  picture, and `GET /jobs?bookKey=` to list a book's job history without
+  needing a job id.
+- A transient ASR failure (a dropped connection, a one-off 5xx) is retried
+  with backoff before giving up; a broken GPU context or a bad request fails
+  immediately instead of retrying something that can't succeed.
+
 ### Talking to the align service directly (fallback, same-LAN only)
 
 ```
 POST /jobs/abs        {serverUrl, token, libraryItemId, ebookLibraryItemId?}  → {jobId, bookKey}
-GET  /jobs/{jobId}     → {state, bookKey, createdAt, detail, entries?}
+GET  /jobs/{jobId}     → {state, stage, bookKey, createdAt, updatedAt, detail, progress,
+                           events: [{t, msg}], phaseSeconds: {phase: seconds},
+                           error?: {stage, message, hint}, entries?}
+GET  /jobs?bookKey=&limit=  → newest-first job summaries (optionally for one book) — each
+                               with `error` when it failed; the quickest "why did the last
+                               align for this book fail" view without a job id in hand
 GET  /maps/{bookKey}   → the map JSON, or 404
-GET  /health           → {ok, device, model, compute, maps, jobs: {id: state}}
+GET  /health           → {ok, device, model, compute, asr, maps, jobs: {id: state}}
 POST /batch            {serverUrl, token, items: [{audioItemId, ebookItemId?}]}  — bulk, resumable across restarts
 GET  /batch            → progress of the registered batch
 ```
@@ -276,10 +309,12 @@ Mirrors `codexaudio`'s `AlignmentRepository` interface:
    the same work, and either a Codex URL (preferred) or a direct align
    service URL configured. Hide the feature entirely otherwise.
 2. **Status**: poll `GET .../status/{itemId}` while a build might be running;
-   show phase + estimated progress/ETA.
+   show phase + estimated progress/ETA. On `state == "error"`, show the
+   response's `error.hint` (see "Descriptive failures" above) rather than a
+   bare "failed" — it's written to be read by whoever clicked the button.
 3. **Build**: `POST .../build/{itemId}` once, idempotent — a second call
    while one's already running/done just reports the existing job/map rather
-   than enqueuing a duplicate.
+   than enqueuing a duplicate; a second call after a failure starts fresh.
 4. **Map**: `GET .../map/{itemId}` once available; cache it (client-side —
    it's static per book, and large books produce large maps). Binary-search
    `entries` by `t0` to find "what's being narrated at audio second N", or by
