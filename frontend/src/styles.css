@@ -315,6 +315,16 @@ input:focus {
   }
 }
 
+/* Immersive (full-screen reading) — the Reader's ⛶ button. Hides everything
+   around the book: the side nav, the mobile menu button and the mini-player.
+   Declared AFTER the media query above on purpose: the mobile rules reuse
+   these same selectors at equal specificity, so source order has to decide. */
+.shell-immersive .shell-sidebar,
+.shell-immersive .shell-menu-toggle,
+.shell-immersive .mini-player {
+  display: none;
+}
+
 /* ── Library ──────────────────────────────────────────────────────────── */
 .lib {
   max-width: 72rem;

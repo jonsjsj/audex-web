@@ -25,6 +25,10 @@ export interface ShellContext {
   // Re-fetch the library list — Settings calls this after adding/removing an
   // Audiobookshelf server so the picker reflects it without a page reload.
   refreshLibraries: () => void;
+  // Full-screen reading: the Reader flips this on to hide the side nav and
+  // mini-player so the book gets the whole window (see .shell-immersive).
+  immersive: boolean;
+  setImmersive: (v: boolean) => void;
 }
 
 // The top-level browse pages that share the persistent search bar. Detail
@@ -44,6 +48,7 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const [navOpen, setNavOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [resetSignal, setResetSignal] = useState(0);
+  const [immersive, setImmersive] = useState(false);
 
   const loadLibraries = () => {
     api
@@ -79,11 +84,12 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const ctx: ShellContext = {
     libraries, libraryId, error, me, onChanged, onSignedOut, search, setSearch, resetSignal,
     refreshLibraries: loadLibraries,
+    immersive, setImmersive,
   };
   const showSearch = SEARCHABLE_PATHS.has(location.pathname);
 
   return (
-    <div className="shell">
+    <div className={`shell ${immersive ? "shell-immersive" : ""}`}>
       <button className="shell-menu-toggle" aria-label="Toggle menu" onClick={() => setNavOpen((v) => !v)}>
         ☰
       </button>
