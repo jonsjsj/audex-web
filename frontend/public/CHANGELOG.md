@@ -7,6 +7,17 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.5.3] - 2026-10-06
+
+### Added
+- **Full-screen reading.** A new button in the Reader header (or press **F**)
+  hides the side navigation, the mobile menu button and the mini-player so the
+  book gets the whole window, and also asks the browser for real fullscreen to
+  hide its own toolbars. **Esc** (or the same button) brings everything back.
+  Browsers that refuse fullscreen (iPhone Safari, notably) still get the
+  in-app layout with the library hidden. Leaving the Reader always restores
+  the normal layout.
+
 ## [0.5.2] - 2026-09-22
 
 ### Fixed

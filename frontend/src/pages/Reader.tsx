@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@readium/shared";
 import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
 import { api, BookDetail } from "../api/client";
+import { useShell } from "../components/Shell";
 import { useReadAlong } from "../lib/useReadAlong";
 import { progressionAt, timeAtProgression } from "../lib/syncMap";
 
@@ -32,6 +33,7 @@ export default function Reader() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { immersive, setImmersive } = useShell();
   const containerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<EpubNavigator | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -290,9 +292,51 @@ export default function Reader() {
     navigate(`/play/${playItemId}?atTime=${t}`);
   }
 
+  // ── Full-screen reading ────────────────────────────────────────────────
+  // Two layers: `immersive` (shell state) hides the side nav / mini-player so
+  // the book gets the whole window — that works everywhere. On top of it we
+  // ask the browser for REAL fullscreen to also hide its own chrome; that's
+  // best-effort (iPhone Safari refuses it for non-video elements, and any
+  // browser can deny it), so a refusal just leaves the in-app layout, which
+  // is still the "hide the library" behaviour that was asked for.
+  function enterImmersive() {
+    setImmersive(true);
+    try {
+      void document.documentElement.requestFullscreen?.()?.catch(() => {});
+    } catch {
+      /* no Fullscreen API — in-app immersive only */
+    }
+  }
+  function exitImmersive() {
+    setImmersive(false);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+  }
+
+  // Esc in browser-fullscreen is swallowed by the browser (it exits fullscreen
+  // itself and never reaches our key handler) — so follow the browser's own
+  // state: once fullscreen is gone, the in-app layout has to come back too.
+  // On unmount (leaving the reader) always restore the full UI, or the side
+  // nav would stay hidden on every other page.
+  useEffect(() => {
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) setImmersive(false);
+    }
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      setImmersive(false);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    };
+  }, [setImmersive]);
+
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowRight" || e.key === "PageDown") nextPage();
     else if (e.key === "ArrowLeft" || e.key === "PageUp") prevPage();
+    else if (e.key === "Escape" && immersive) exitImmersive(); // in-app immersive when the browser refused fullscreen
+    else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (immersive) exitImmersive();
+      else enterImmersive();
+    }
   }
 
   const [discarding, setDiscarding] = useState(false);
@@ -364,6 +408,20 @@ export default function Reader() {
           </button>
           <button className="reader-font-btn" onClick={discardProgress} disabled={discarding} aria-label="Discard progress">
             {discarding ? "…" : "⟲"}
+          </button>
+          <button
+            className="reader-font-btn"
+            onClick={immersive ? exitImmersive : enterImmersive}
+            aria-label={immersive ? "Exit full screen" : "Full screen"}
+            title={immersive ? "Exit full screen (Esc)" : "Full screen (F)"}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              {immersive ? (
+                <path d="M5 1v4H1M13 5H9V1M9 13V9h4M1 9h4v4" />
+              ) : (
+                <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9" />
+              )}
+            </svg>
           </button>
         </div>
       </header>
