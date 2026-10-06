@@ -4,6 +4,7 @@ import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@
 import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
 import { api, BookDetail } from "../api/client";
 import { useShell } from "../components/Shell";
+import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
 import { progressionAt, timeAtProgression } from "../lib/syncMap";
 import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
@@ -41,6 +42,28 @@ function loadPages(): PageCount {
 }
 
 const SAVE_DEBOUNCE_MS = 2000;
+
+const FOLLOW_KEY = "audexweb.reader.follow";
+function loadFollow(): boolean {
+  try {
+    return localStorage.getItem(FOLLOW_KEY) !== "0"; // on unless switched off
+  } catch {
+    return true;
+  }
+}
+// After you turn a page yourself, leave it alone for this long before the page
+// starts following the audio again.
+const FOLLOW_PAUSE_MS = 8000;
+
+const ALIGN_RUNNING = new Set(["queued", "downloading", "extracting", "transcribing", "aligning"]);
+// What the alignment service is doing, in words for the person who asked for it.
+const ALIGN_PHASE: Record<string, string> = {
+  queued: "Waiting in the queue",
+  downloading: "Downloading the audiobook",
+  extracting: "Reading the book's text",
+  transcribing: "Listening to the audiobook",
+  aligning: "Matching the audio to the text",
+};
 // How far a saved locator may disagree with the saved percentage before the
 // percentage wins. We always write the two together, so a gap means ANOTHER
 // client (the Audex app, Codex's cross-edition sync) moved the position since.
@@ -105,6 +128,7 @@ export default function Reader() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { immersive, setImmersive } = useShell();
+  const playback = usePlayback();
   const containerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<EpubNavigator | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,7 +145,8 @@ export default function Reader() {
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [panel, setPanel] = useState<"chapters" | "bookmarks" | null>(null);
+  const [panel, setPanel] = useState<"chapters" | "bookmarks" | "readalong" | null>(null);
+  const [follow, setFollow] = useState(loadFollow);
   const [store, setStore] = useState<BookmarkStore | null>(null);
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -136,6 +161,13 @@ export default function Reader() {
   // The latest preference values, readable from the async open() closure and
   // from handlers without waiting on a re-render.
   const fontIdxRef = useRef(1);
+  // Follow-the-audio bookkeeping: when a manual page turn last happened, how much
+  // of the book one page is (learned from your own page turns), and whether the
+  // position change being reported was one WE caused by following.
+  const followPausedUntilRef = useRef(0);
+  const pageSpanRef = useRef(0.004);
+  const lastTotalRef = useRef(0);
+  const selfNavRef = useRef(false);
   const pagesRef = useRef<PageCount>(pages);
   // Readium's fixed-size position list from this load — stashed for the
   // auto-resume effect below, which runs later (once the map arrives) and
@@ -316,6 +348,10 @@ export default function Reader() {
             const loc = nav?.currentLocator ?? locator;
             if (!loc?.locations) return;
             const total = totalOf(loc);
+            const step = total - lastTotalRef.current;
+            if (!selfNavRef.current && step > 0 && step < 0.05) pageSpanRef.current = step; // one page, as turned by hand
+            selfNavRef.current = false;
+            lastTotalRef.current = total;
             progressionRef.current = total;
             setFraction(total);
             setProgressPct(Math.round(total * 100));
@@ -400,6 +436,40 @@ export default function Reader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAlong.map, bookDetail]);
 
+  // ── Follow the audio ────────────────────────────────────────────────────
+  // With a read-along map and THIS book's audiobook playing, turn the page to
+  // wherever the narration has reached. "On the page you're looking at" is the
+  // span from the page's start to one page further (learned from your own page
+  // turns, so a two-page spread or a bigger font is accounted for); only when
+  // the narration leaves that span does the page move. Turning a page yourself
+  // pauses this briefly (pauseFollow) so it never fights you.
+  const followingThisBook = !!readAlongAnchorId && playback.itemId === readAlongAnchorId && playback.isPlaying;
+  useEffect(() => {
+    if (!follow || !readAlong.map || !followingThisBook) return;
+    if (Date.now() < followPausedUntilRef.current) return;
+    const p = progressionAt(readAlong.map, playback.positionS);
+    if (p === null) return;
+    const here = progressionRef.current;
+    const slack = Math.max(0.002, pageSpanRef.current * 1.1);
+    if (p >= here - 0.0005 && p <= here + slack) return; // the narrator is on this page
+    const target = locatorAtTotal(p);
+    if (!target) return;
+    selfNavRef.current = true; // so this jump isn't mistaken for a page turn by hand
+    navRef.current?.go(target, false, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playback.positionS, follow, readAlong.map, followingThisBook]);
+
+  function toggleFollow() {
+    setFollow((v) => {
+      try {
+        localStorage.setItem(FOLLOW_KEY, v ? "0" : "1");
+      } catch {
+        /* per-device convenience only */
+      }
+      return !v;
+    });
+  }
+
   // Debounced, not on every positionChanged — a fast page-turner would
   // otherwise fire a PATCH per page. Coalesces to the LATEST position only:
   // fine to drop an intermediate position, never fine to drop the final one
@@ -422,10 +492,18 @@ export default function Reader() {
     api.saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total }).catch(() => {});
   }
 
+  /** A deliberate move by the reader: don't let following the audio yank the
+   *  page straight back for a few seconds. */
+  function pauseFollow() {
+    followPausedUntilRef.current = Date.now() + FOLLOW_PAUSE_MS;
+  }
+
   function prevPage() {
+    pauseFollow();
     navRef.current?.goBackward(true, () => {});
   }
   function nextPage() {
+    pauseFollow();
     navRef.current?.goForward(true, () => {});
   }
 
@@ -519,6 +597,7 @@ export default function Reader() {
   /** Before a big jump (slider, chapter, bookmark): remember where you WERE, so an
    *  accidental jump never loses your place. */
   function leftOffBeforeJump(to: number) {
+    pauseFollow();
     const from = progressionRef.current;
     if (!store || Math.abs(to - from) <= JUMP_THRESHOLD) return;
     void dropLeftOff(store, bookmarks, from)
@@ -714,6 +793,25 @@ export default function Reader() {
   // pick, the slider, a resume from a saved %) carries no title of its own.
   const shownChapter = (activeToc >= 0 ? toc[activeToc]?.title : null) ?? chapterTitle;
 
+  // Read-along (word sync): what to show for this book. Only books that have an
+  // audiobook edition — its own, or a paired one — can ever be aligned.
+  const canAlign = hasAudio || !!bookDetail?.pairedItemId;
+  const raStatus = readAlong.status;
+  const raReady = !!readAlong.map;
+  const raRunning = !raReady && !!raStatus && ALIGN_RUNNING.has(raStatus.state);
+  const raFailed = !raReady && raStatus?.state === "error";
+  const raOff = !raReady && raStatus?.configured === false;
+  const raText = raReady ? (follow && followingThisBook ? "Following" : "Read-along") : raRunning ? "Aligning…" : "Read-along";
+  const raMark = raReady
+    ? follow && followingThisBook
+      ? ""
+      : "✓"
+    : raRunning
+      ? `${Math.round((raStatus?.progress ?? 0) * 100)}%`
+      : raFailed
+        ? "⚠"
+        : "";
+
   return (
     <div className="reader-wrap" tabIndex={-1}>
       <header className="reader-head">
@@ -810,22 +908,6 @@ export default function Reader() {
         </button>
       </div>
 
-      {(hasAudio || bookDetail?.pairedItemId) && !readAlong.map && (
-        // The switch-to-listening action itself now lives in the header
-        // (always visible, no scrolling needed) — this block is just the
-        // read-along build prompt/status, which only matters pre-map.
-        <div className="reader-readalong">
-          {readAlong.status && readAlong.status.state !== "none" && readAlong.status.state !== "error" ? (
-            <span className="reader-readalong-status">Building word sync…</span>
-          ) : (
-            <button className="reader-readalong-build" onClick={() => readAlong.requestBuild(hasAudio ? undefined : itemId)}>
-              Build read-along
-            </button>
-          )}
-          {readAlong.error && <span className="reader-readalong-status">{readAlong.error}</span>}
-        </div>
-      )}
-
       {/* Bottom bar: a thin progress line is always there; the controls appear
           when the mouse is over it (or focus is inside it, or a list is open). */}
       <div className={`reader-bottom ${panel ? "open" : ""}`}>
@@ -851,6 +933,68 @@ export default function Reader() {
                 </button>
               ))
             )}
+          </div>
+        )}
+        {panel === "readalong" && canAlign && (
+          <div className="reader-panel" role="dialog" aria-label="Read-along">
+            <div className="reader-panel-title">Read-along</div>
+            {raReady ? (
+              <>
+                <p className="reader-ra-line">✓ Aligned — the text and the audiobook are in sync.</p>
+                <button className="reader-panel-item reader-panel-add" onClick={act(jumpToAudio)}>
+                  🎧 Listen from here
+                </button>
+                <label className="reader-ra-check">
+                  <input type="checkbox" checked={follow} onChange={toggleFollow} />
+                  <span>Follow the audiobook while it plays</span>
+                </label>
+                <p className="reader-panel-note">
+                  {follow
+                    ? followingThisBook
+                      ? "Following the audio — the page turns to keep up. Turn a page yourself and it waits a few seconds."
+                      : "Start the audiobook (🎧 Listen) and the page will follow it."
+                    : "Off — the page stays where you leave it."}
+                </p>
+              </>
+            ) : raOff ? (
+              <p className="reader-ra-line">
+                Read-along isn't set up on this server. It needs a Codex instance with the alignment service connected.
+              </p>
+            ) : raRunning ? (
+              <>
+                <p className="reader-ra-line">{ALIGN_PHASE[raStatus!.state] ?? "Working"}…</p>
+                <div className="reader-ra-bar" aria-hidden>
+                  <div style={{ width: `${Math.round((raStatus!.progress ?? 0) * 100)}%` }} />
+                </div>
+                <p className="reader-panel-note">
+                  {raStatus!.etaSeconds != null ? `About ${Math.max(1, Math.round(raStatus!.etaSeconds / 60))} min left. ` : ""}
+                  This can take a while for a long book — you can keep reading, and it'll be ready next time you look.
+                </p>
+              </>
+            ) : raFailed ? (
+              <>
+                <p className="reader-ra-line reader-ra-error">
+                  Alignment didn't finish{raStatus?.error?.stage ? ` (while ${raStatus.error.stage})` : ""}.
+                </p>
+                {raStatus?.error?.message && <p className="reader-panel-empty">{raStatus.error.message}</p>}
+                {raStatus?.error?.hint && <p className="reader-ra-hint">{raStatus.error.hint}</p>}
+                <button className="reader-panel-item reader-panel-add" onClick={act(() => void readAlong.requestBuild(hasAudio ? undefined : itemId))}>
+                  Try again
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="reader-ra-line">Not aligned yet.</p>
+                <p className="reader-panel-empty">
+                  Aligning matches the audiobook to the text, so you can switch between listening and reading at exactly the same spot,
+                  and the page can follow the narration.
+                </p>
+                <button className="reader-panel-item reader-panel-add" onClick={act(() => void readAlong.requestBuild(hasAudio ? undefined : itemId))}>
+                  Request alignment
+                </button>
+              </>
+            )}
+            {readAlong.error && <p className="reader-ra-hint">{readAlong.error}</p>}
           </div>
         )}
         {panel === "bookmarks" && (
@@ -889,15 +1033,27 @@ export default function Reader() {
             onClick={act(() => setPanel((p) => (p === "chapters" ? null : "chapters")))}
             aria-expanded={panel === "chapters"}
           >
-            ☰ Chapters
+            ☰ <span className="reader-lbl">Chapters</span>
           </button>
           <button
             className="reader-font-btn"
             onClick={act(() => setPanel((p) => (p === "bookmarks" ? null : "bookmarks")))}
             aria-expanded={panel === "bookmarks"}
           >
-            🔖 Bookmarks{bookmarks.some((b) => !b.auto) ? ` (${bookmarks.filter((b) => !b.auto).length})` : ""}
+            🔖 <span className="reader-lbl">Bookmarks</span>
+            {bookmarks.some((b) => !b.auto) ? ` (${bookmarks.filter((b) => !b.auto).length})` : ""}
           </button>
+          {canAlign && (
+            <button
+              className="reader-font-btn"
+              onClick={act(() => setPanel((p) => (p === "readalong" ? null : "readalong")))}
+              aria-expanded={panel === "readalong"}
+              title="Word-synced read-along"
+            >
+              🎧 <span className="reader-lbl">{raText}</span>
+              {raMark ? ` ${raMark}` : ""}
+            </button>
+          )}
           <div className="reader-slider-wrap">
             <input
               className="reader-slider"
@@ -924,7 +1080,7 @@ export default function Reader() {
           </div>
           <span className="reader-progress-pct">{Math.round(shownFraction * 100)}%</span>
           <button className="reader-font-btn" onClick={act(() => void addBookmarkHere())} disabled={!store} title="Bookmark this spot (B)">
-            ＋ Bookmark
+            ＋ <span className="reader-lbl">Bookmark</span>
           </button>
         </div>
         <div className="reader-progress-line" aria-hidden>

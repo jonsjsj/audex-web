@@ -1670,6 +1670,17 @@ input:focus {
   opacity: 1;
   pointer-events: auto;
 }
+/* A phone-sized bottom bar can't fit four labelled buttons and a slider: keep the
+   icons (and the ✓ / % / ⚠ status marks), drop the words. */
+@media (max-width: 40rem) {
+  .reader-lbl {
+    display: none;
+  }
+  .reader-controls {
+    gap: 0.45rem;
+    padding: 0 0.6rem;
+  }
+}
 .reader-slider-wrap {
   position: relative;
   flex: 1;
@@ -1829,33 +1840,47 @@ input:focus {
   line-height: 1.4;
 }
 
-.reader-readalong {
+.reader-ra-line {
+  margin: 0;
+  padding: 0.35rem 0.8rem 0.2rem;
+  font-size: 0.88rem;
+  color: var(--ink);
+}
+.reader-ra-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+.reader-ra-hint {
+  margin: 0.2rem 0.8rem 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+.reader-ra-bar {
+  margin: 0.3rem 0.8rem 0.2rem;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.reader-ra-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.reader-ra-check {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.4rem 1rem 0.7rem;
-  flex: none;
-}
-.reader-readalong-jump,
-.reader-readalong-build {
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 0.35rem 0.9rem;
-  font-family: var(--sans);
-  font-size: 0.76rem;
-  color: var(--accent);
+  gap: 0.55rem;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.86rem;
   cursor: pointer;
 }
-.reader-readalong-jump:hover,
-.reader-readalong-build:hover {
-  background: var(--surface-2);
-}
-.reader-readalong-status {
-  font-family: var(--sans);
-  font-size: 0.76rem;
-  color: var(--muted);
+.reader-ra-check input {
+  accent-color: var(--accent);
 }
 
 /* ── Settings ─────────────────────────────────────────────────────────── */

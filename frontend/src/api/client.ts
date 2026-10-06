@@ -137,6 +137,8 @@ export interface ReadAlongStatus {
   state: string; // "none" | "queued" | "downloading" | "extracting" | "transcribing" | "aligning" | "done" | "error"
   progress: number; // 0..1
   etaSeconds: number | null;
+  /** Only when state === "error": what failed and what to do about it. */
+  error?: { stage: string | null; message: string | null; hint: string | null } | null;
 }
 
 export interface SyncMapEntry {

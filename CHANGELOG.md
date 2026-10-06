@@ -24,6 +24,12 @@ here whenever there's something worth shipping.
   chapter (the server sends each chapter's text length with the manifest), so
   the percentage moves page by page and that finer number is what's saved as
   `ebookProgress`.
+- **"Request alignment" never showed the result.** After pressing it the page
+  said "Building…" forever, because nothing checked on the job again — you only
+  saw it finish after a reload. It now watches the job through to the end.
+- **A failed alignment said nothing about why.** The alignment service reports
+  which phase failed, what happened and what to do about it; the server dropped
+  all of that. It's passed through and shown, with a Try again button.
 - **Opening a book now resumes at the right place when the saved position came
   from another app.** The Audex app and Codex store their own location format,
   which the web reader can't open — it used to start at page one even though
@@ -39,9 +45,28 @@ here whenever there's something worth shipping.
   just on the page around it.
 - **A bottom bar that appears when you mouse over the bottom of the Reader**
   with a progress slider you can drag or click to jump anywhere in the book,
-  and a **Chapters** list (current chapter highlighted) built from the book's
-  table of contents. The chapter name in the header now comes from the same
-  table of contents, so it stays correct after a jump.
+  a **Chapters** list (current chapter highlighted) built from the book's table
+  of contents, **Bookmarks**, and **Read-along**.
+- **Bookmarks**, stored the way the Audex app stores them. A book with an
+  audiobook edition (its own, or a paired one) keeps them in Audiobookshelf as
+  a point in the audio — so they show up in the Audex app too, and the other
+  way round. A book with no audiobook has no audio to hang one on, so those are
+  kept by audex-web itself (on this server only; the panel says so). Add one
+  with the **＋ Bookmark** button or the **B** key; tick marks on the slider show
+  where they are. Jumping more than ~1.5% of the book with the slider, a chapter
+  or a bookmark also drops an automatic **"Left off"** marker at the place you
+  left (the newest five are kept), so an accidental jump never loses your spot.
+- **Read-along in the Reader.** A Read-along button shows whether the book is
+  aligned, and lets you **request alignment** with live progress (phase, percent,
+  time left) and — if it fails — what went wrong and what to try. Once aligned,
+  **"Follow the audiobook while it plays"** turns the page to keep up with the
+  narration; turning a page yourself pauses that for a few seconds, and it can be
+  switched off. (It follows by page — it doesn't highlight the sentence being
+  read yet.)
+- The chapter name in the Reader's header now comes from the book's table of
+  contents, so it stays correct after a jump; and the "resumed from your
+  listening progress" message is a brief overlay instead of a line that resized
+  the book when it appeared.
 
 ## [0.5.3] - 2026-10-06
 

@@ -15,6 +15,11 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
   const [error, setError] = useState<string | null>(null);
   // Avoids a second, stale-closure map fetch once one is already in flight/done.
   const mapFetchedRef = useRef(false);
+  // Bumped to RESTART the status polling below. The loop stops by itself once a
+  // book isn't building (nothing to wait for), so requesting a build has to
+  // start it again — otherwise the page would say "building" forever and never
+  // notice it had finished or failed.
+  const [pollRun, setPollRun] = useState(0);
 
   useEffect(() => {
     if (!itemId || !enabled) return;
@@ -44,7 +49,7 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [itemId, enabled]);
+  }, [itemId, enabled, pollRun]);
 
   useEffect(() => {
     if (!itemId || !status?.available || mapFetchedRef.current) return;
@@ -66,6 +71,7 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
         progress: prev?.progress ?? 0,
         etaSeconds: res.eta_seconds ?? null,
       }));
+      setPollRun((n) => n + 1); // start watching it
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start word sync.");
     }
