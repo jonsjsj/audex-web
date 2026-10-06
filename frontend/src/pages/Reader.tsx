@@ -7,6 +7,15 @@ import { useShell } from "../components/Shell";
 import { useReadAlong } from "../lib/useReadAlong";
 import { progressionAt, timeAtProgression } from "../lib/syncMap";
 import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
+import {
+  absStore,
+  bookmarkTitle,
+  BookmarkStore,
+  dropLeftOff,
+  JUMP_THRESHOLD,
+  localStore,
+  ReaderBookmark,
+} from "../lib/readerBookmarks";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -46,11 +55,13 @@ const KEY_NEXT = "audex-next";
 const KEY_PREV = "audex-prev";
 const KEY_ESCAPE = "audex-escape";
 const KEY_FULLSCREEN = "audex-fullscreen";
+const KEY_BOOKMARK = "audex-bookmark";
 const KEYBOARD_PERIPHERALS = [
   { type: KEY_NEXT, keyCombos: [{ keyCode: 39 }, { keyCode: 34 }, { keyCode: 32 }] }, // →  PageDown  Space
   { type: KEY_PREV, keyCombos: [{ keyCode: 37 }, { keyCode: 33 }, { keyCode: 32, shift: true }] }, // ←  PageUp  Shift+Space
   { type: KEY_ESCAPE, keyCombos: [{ keyCode: 27 }] },
   { type: KEY_FULLSCREEN, keyCombos: [{ keyCode: 70 }] }, // F
+  { type: KEY_BOOKMARK, keyCombos: [{ keyCode: 66 }] }, // B
 ];
 
 interface TocItem {
@@ -110,9 +121,11 @@ export default function Reader() {
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [panel, setPanel] = useState<"chapters" | null>(null);
+  const [panel, setPanel] = useState<"chapters" | "bookmarks" | null>(null);
+  const [store, setStore] = useState<BookmarkStore | null>(null);
+  const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
   const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
-  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const hasAudio = (bookDetail?.numAudioFiles ?? 0) > 0;
   // Mirrors progressPct as a raw 0..1 fraction — progressPct is rounded for
   // display, too coarse to feed back into progressionAt/timeAtProgression.
@@ -183,6 +196,8 @@ export default function Reader() {
     } else if (action === KEY_FULLSCREEN) {
       if (immersive) exitImmersive();
       else enterImmersive();
+    } else if (action === KEY_BOOKMARK) {
+      void addBookmarkHere();
     }
   };
 
@@ -381,7 +396,7 @@ export default function Reader() {
     const target = locatorAtTotal(targetP);
     if (!target) return;
     navRef.current.go(target, true, () => {});
-    setResumeNotice("Resumed from your listening progress");
+    flash("Resumed from your listening progress", 4000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAlong.map, bookDetail]);
 
@@ -443,11 +458,87 @@ export default function Reader() {
     await navRef.current?.submitPreferences(prefsFor(fontIdxRef.current, count));
   }
 
+  // ── Bookmarks ───────────────────────────────────────────────────────────
+  /** A short message over the bottom bar. An overlay, not a line in the page
+   *  flow: a line that appears and disappears resizes the book underneath it. */
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function flash(message: string, ms = 2600) {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), ms);
+  }
+
+  // Where this book's bookmarks live: in Audiobookshelf when there's an audiobook
+  // edition to hang them on (this item's own audio, or a paired audio item —
+  // shared with the Audex app), otherwise on this server (see lib/readerBookmarks.ts).
+  useEffect(() => {
+    if (!itemId || !bookDetail) return;
+    let cancelled = false;
+    (async () => {
+      let next: BookmarkStore;
+      if (bookDetail.numAudioFiles > 0 && (bookDetail.durationS ?? 0) > 0) {
+        next = absStore(itemId, bookDetail.durationS!);
+      } else {
+        const other = bookDetail.pairedItemId ? await api.item(bookDetail.pairedItemId).catch(() => null) : null;
+        next =
+          other && other.numAudioFiles > 0 && (other.durationS ?? 0) > 0
+            ? absStore(other.id, other.durationS!)
+            : localStore(itemId);
+      }
+      if (cancelled) return;
+      setStore(next);
+      next.list().then((rows) => !cancelled && setBookmarks(rows)).catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId, bookDetail]);
+
+  async function refreshBookmarks() {
+    if (store) setBookmarks(await store.list().catch(() => bookmarks));
+  }
+
+  async function addBookmarkHere() {
+    if (!store) return;
+    const at = progressionRef.current;
+    try {
+      await store.add(at, bookmarkTitle(at));
+      flash(`Bookmarked at ${Math.round(at * 100)}%`);
+      await refreshBookmarks();
+    } catch (e) {
+      flash(e instanceof Error ? e.message : "Couldn't save that bookmark.");
+    }
+  }
+
+  async function removeBookmark(b: ReaderBookmark) {
+    if (!store) return;
+    await store.remove(b).catch(() => {});
+    await refreshBookmarks();
+  }
+
+  /** Before a big jump (slider, chapter, bookmark): remember where you WERE, so an
+   *  accidental jump never loses your place. */
+  function leftOffBeforeJump(to: number) {
+    const from = progressionRef.current;
+    if (!store || Math.abs(to - from) <= JUMP_THRESHOLD) return;
+    void dropLeftOff(store, bookmarks, from)
+      .then(refreshBookmarks)
+      .catch(() => {});
+  }
+
+  function goBookmark(b: ReaderBookmark) {
+    leftOffBeforeJump(b.fraction);
+    const target = locatorAtTotal(b.fraction);
+    if (target) navRef.current?.go(target, true, () => {});
+    setPanel(null);
+  }
+
   /** Jump to a chapter from the Chapters list. */
   function goToc(item: TocItem) {
     const [base, fragment] = item.href.split("#");
     const w = weightsRef.current;
     const at = w ? w.hrefs.indexOf(base) : -1;
+    if (w && at >= 0) leftOffBeforeJump(w.starts[at] / w.total);
     navRef.current?.go(
       new Locator({
         href: base,
@@ -467,6 +558,7 @@ export default function Reader() {
   /** The slider was released: go to wherever it was dragged to. */
   function commitSeek(e: React.SyntheticEvent<HTMLInputElement>) {
     const value = Number(e.currentTarget.value) / 1000;
+    leftOffBeforeJump(value);
     setScrub(null);
     e.currentTarget.blur(); // hand the arrow keys back to page turning
     const target = locatorAtTotal(value);
@@ -552,6 +644,10 @@ export default function Reader() {
         case "f":
         case "F":
           action = KEY_FULLSCREEN;
+          break;
+        case "b":
+        case "B":
+          action = KEY_BOOKMARK;
           break;
       }
       if (!action) return;
@@ -714,8 +810,6 @@ export default function Reader() {
         </button>
       </div>
 
-      {resumeNotice && <p className="reader-resume-notice">{resumeNotice}</p>}
-
       {(hasAudio || bookDetail?.pairedItemId) && !readAlong.map && (
         // The switch-to-listening action itself now lives in the header
         // (always visible, no scrolling needed) — this block is just the
@@ -733,9 +827,13 @@ export default function Reader() {
       )}
 
       {/* Bottom bar: a thin progress line is always there; the controls appear
-          when the mouse is over it (or focus is inside it, or the chapter list
-          is open). */}
+          when the mouse is over it (or focus is inside it, or a list is open). */}
       <div className={`reader-bottom ${panel ? "open" : ""}`}>
+        {toast && (
+          <div className="reader-toast" role="status">
+            {toast}
+          </div>
+        )}
         {panel === "chapters" && (
           <div className="reader-panel" role="dialog" aria-label="Chapters">
             <div className="reader-panel-title">Chapters</div>
@@ -755,6 +853,36 @@ export default function Reader() {
             )}
           </div>
         )}
+        {panel === "bookmarks" && (
+          <div className="reader-panel" role="dialog" aria-label="Bookmarks">
+            <div className="reader-panel-title">Bookmarks</div>
+            <button className="reader-panel-item reader-panel-add" onClick={act(() => void addBookmarkHere())} disabled={!store}>
+              ＋ Bookmark this spot ({Math.round(fraction * 100)}%)
+            </button>
+            {bookmarks.length === 0 ? (
+              <p className="reader-panel-empty">No bookmarks yet. Press B to add one.</p>
+            ) : (
+              bookmarks.map((b) => (
+                <div key={b.key} className="reader-panel-row">
+                  <button className="reader-panel-item" onClick={act(() => goBookmark(b))}>
+                    <span className={b.auto ? "reader-bm-auto" : ""}>{b.title}</span>
+                    <span className="reader-bm-pct">{Math.round(b.fraction * 100)}%</span>
+                  </button>
+                  <button className="reader-bm-del" onClick={act(() => void removeBookmark(b))} aria-label={`Delete bookmark ${b.title}`}>
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+            {store && (
+              <p className="reader-panel-note">
+                {store.synced
+                  ? "Saved to Audiobookshelf, so the Audex app shows them too."
+                  : "Saved on this server only — this book has no audiobook edition to share them through."}
+              </p>
+            )}
+          </div>
+        )}
         <div className="reader-controls">
           <button
             className="reader-font-btn"
@@ -763,20 +891,41 @@ export default function Reader() {
           >
             ☰ Chapters
           </button>
-          <input
-            className="reader-slider"
-            type="range"
-            min={0}
-            max={1000}
-            value={Math.round(shownFraction * 1000)}
-            onChange={(e) => setScrub(Number(e.target.value) / 1000)}
-            onPointerUp={commitSeek}
-            onKeyUp={(e) => {
-              if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) commitSeek(e);
-            }}
-            aria-label="Reading progress"
-          />
+          <button
+            className="reader-font-btn"
+            onClick={act(() => setPanel((p) => (p === "bookmarks" ? null : "bookmarks")))}
+            aria-expanded={panel === "bookmarks"}
+          >
+            🔖 Bookmarks{bookmarks.some((b) => !b.auto) ? ` (${bookmarks.filter((b) => !b.auto).length})` : ""}
+          </button>
+          <div className="reader-slider-wrap">
+            <input
+              className="reader-slider"
+              type="range"
+              min={0}
+              max={1000}
+              value={Math.round(shownFraction * 1000)}
+              onChange={(e) => setScrub(Number(e.target.value) / 1000)}
+              onPointerUp={commitSeek}
+              onKeyUp={(e) => {
+                if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) commitSeek(e);
+              }}
+              aria-label="Reading progress"
+            />
+            {bookmarks.map((b) => (
+              <span
+                key={b.key}
+                className={`reader-tick ${b.auto ? "auto" : ""}`}
+                style={{ left: `calc(8px + (100% - 16px) * ${b.fraction})` }}
+                title={b.title}
+                aria-hidden
+              />
+            ))}
+          </div>
           <span className="reader-progress-pct">{Math.round(shownFraction * 100)}%</span>
+          <button className="reader-font-btn" onClick={act(() => void addBookmarkHere())} disabled={!store} title="Bookmark this spot (B)">
+            ＋ Bookmark
+          </button>
         </div>
         <div className="reader-progress-line" aria-hidden>
           <div className="reader-progress-fill" style={{ width: `${(progressPct === null ? 0 : fraction) * 100}%` }} />

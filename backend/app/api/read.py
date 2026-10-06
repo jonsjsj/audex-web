@@ -11,13 +11,14 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import AbsConn, resolve
 from app.api.deps import get_current_identity
 from app.core import abs_client
 from app.core.abs_client import AbsError
-from app.core.database import Identity, get_db
+from app.core.database import Identity, ReaderBookmark, get_db
 from app.core.epub import EpubError, ParsedEpub, build_manifest, parse_epub
 
 router = APIRouter(prefix="/api/read", tags=["read"])
@@ -198,4 +199,86 @@ async def discard_position(
         await abs_client.delete_progress(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
+    return {"ok": True}
+
+
+# ─── Reading bookmarks for books with no audiobook edition ──────────────────
+# A book WITH audio keeps its bookmarks in Audiobookshelf (a point in the audio,
+# via the /api/play/{id}/bookmarks routes — shared with the Audex app). An
+# ebook-only book has no duration to express a position in, so its bookmarks
+# are kept here instead: per person, on this server only. See
+# core/database.py's ReaderBookmark.
+
+class BookmarkBody(BaseModel):
+    fraction: float  # 0..1 through the whole book
+    title: str = ""
+
+
+def _bookmark_json(b: ReaderBookmark) -> dict:
+    return {
+        "id": b.id,
+        "fraction": b.fraction,
+        "title": b.title,
+        "createdAt": int((b.created_at or 0) * 1000),  # epoch ms, like ABS bookmarks
+    }
+
+
+@router.get("/{item_id}/bookmarks")
+async def list_reader_bookmarks(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    await resolve(identity, db, item_id)  # 400 for an item on a server that isn't connected
+    rows = (
+        await db.execute(
+            select(ReaderBookmark)
+            .where(ReaderBookmark.identity_id == identity.id, ReaderBookmark.item_id == item_id)
+            .order_by(ReaderBookmark.fraction)
+        )
+    ).scalars().all()
+    return [_bookmark_json(b) for b in rows]
+
+
+@router.post("/{item_id}/bookmarks")
+async def add_reader_bookmark(
+    item_id: str,
+    body: BookmarkBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    await resolve(identity, db, item_id)
+    row = ReaderBookmark(
+        identity_id=identity.id,
+        item_id=item_id,
+        fraction=max(0.0, min(1.0, body.fraction)),
+        title=(body.title or "Bookmark").strip()[:200],
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _bookmark_json(row)
+
+
+@router.delete("/{item_id}/bookmarks/{bookmark_id}")
+async def remove_reader_bookmark(
+    item_id: str,
+    bookmark_id: int,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    # Scoped to this person AND this item: an id from another book or another
+    # person's account deletes nothing rather than somebody else's bookmark.
+    row = (
+        await db.execute(
+            select(ReaderBookmark).where(
+                ReaderBookmark.id == bookmark_id,
+                ReaderBookmark.identity_id == identity.id,
+                ReaderBookmark.item_id == item_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row:
+        await db.delete(row)
+        await db.commit()
     return {"ok": True}

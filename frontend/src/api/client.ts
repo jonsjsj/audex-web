@@ -118,6 +118,14 @@ export interface Bookmark {
   createdAt: number | null;
 }
 
+/** A reading bookmark kept by audex-web itself (a book with no audiobook edition). */
+export interface LocalBookmark {
+  id: number;
+  fraction: number; // 0..1 through the whole book
+  title: string;
+  createdAt: number; // epoch ms
+}
+
 export interface UserPrefs {
   playbackSpeed: number;
   readerFontSize: number;
@@ -234,6 +242,14 @@ export const api = {
     request<{ ok: true }>(`/api/play/${itemId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
   removeBookmark: (itemId: string, timeS: number) =>
     request<{ ok: true }>(`/api/play/${itemId}/bookmarks/${Math.round(timeS)}`, { method: "DELETE" }),
+
+  // Reading bookmarks for books with NO audiobook edition (those with audio use
+  // the Audiobookshelf bookmark calls above, shared with the Audex app).
+  readerBookmarks: (itemId: string) => request<LocalBookmark[]>(`/api/read/${itemId}/bookmarks`),
+  addReaderBookmark: (itemId: string, body: { fraction: number; title: string }) =>
+    request<LocalBookmark>(`/api/read/${itemId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
+  removeReaderBookmark: (itemId: string, id: number) =>
+    request<{ ok: true }>(`/api/read/${itemId}/bookmarks/${id}`, { method: "DELETE" }),
 
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>

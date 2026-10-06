@@ -1670,11 +1670,50 @@ input:focus {
   opacity: 1;
   pointer-events: auto;
 }
-.reader-slider {
+.reader-slider-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.reader-slider {
+  width: 100%;
   accent-color: var(--accent);
   cursor: pointer;
+}
+/* A mark on the slider for each bookmark; "Left off" markers are fainter. */
+.reader-tick {
+  position: absolute;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  margin-left: -1px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.reader-tick.auto {
+  background: var(--muted);
+  opacity: 0.7;
+}
+/* A short message over the bottom bar (bookmark added, resumed from audio…). */
+.reader-toast {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.6rem);
+  transform: translateX(-50%);
+  z-index: 6;
+  max-width: calc(100% - 2rem);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  box-shadow: var(--shadow);
+  pointer-events: none;
 }
 .reader-progress-pct {
   font-family: var(--mono);
@@ -1734,14 +1773,60 @@ input:focus {
   color: var(--accent);
   font-weight: 600;
 }
-
-.reader-resume-notice {
-  text-align: center;
-  font-family: var(--sans);
-  font-size: 0.74rem;
+.reader-panel-add {
   color: var(--accent);
-  padding: 0.3rem 1rem 0;
+  font-weight: 600;
+}
+.reader-panel-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* A bookmark row: the jump button (title + %) and its delete ×. */
+.reader-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.reader-panel-row .reader-panel-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex: 1;
+  min-width: 0;
+}
+.reader-bm-pct {
   flex: none;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.reader-bm-auto {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.reader-bm-del {
+  flex: none;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.reader-bm-del:hover {
+  background: var(--surface-2);
+  color: var(--danger);
+}
+.reader-panel-note {
+  margin: 0.3rem 0.8rem 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .reader-readalong {
