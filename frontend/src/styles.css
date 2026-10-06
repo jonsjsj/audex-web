@@ -315,14 +315,78 @@ input:focus {
   }
 }
 
+/* Hide/show the side menu (desktop). The mobile layout already has its own
+   off-canvas ☰ menu, so none of this applies below the breakpoint. */
+.shell-brandrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.shell-collapse {
+  flex: none;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.shell-collapse:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.shell-sidebar-reveal {
+  display: none;
+}
+@media (max-width: 56rem) {
+  .shell-collapse {
+    display: none;
+  }
+}
+@media (min-width: 56.0625rem) {
+  .shell-collapsed .shell-sidebar {
+    display: none;
+  }
+  .shell-collapsed .shell-sidebar-reveal {
+    display: block;
+    position: fixed;
+    top: 0.9rem;
+    left: 0.9rem;
+    z-index: 20;
+    width: 2.1rem;
+    height: 2.1rem;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    cursor: pointer;
+    opacity: 0.8;
+  }
+  .shell-collapsed .shell-sidebar-reveal:hover {
+    opacity: 1;
+  }
+  /* Room for the reveal button, so it never sits on top of a page's own header. */
+  .shell-collapsed .shell-main {
+    padding-left: 3.4rem;
+  }
+}
+
 /* Immersive (full-screen reading) — the Reader's ⛶ button. Hides everything
    around the book: the side nav, the mobile menu button and the mini-player.
    Declared AFTER the media query above on purpose: the mobile rules reuse
    these same selectors at equal specificity, so source order has to decide. */
 .shell-immersive .shell-sidebar,
 .shell-immersive .shell-menu-toggle,
+.shell-immersive .shell-sidebar-reveal,
 .shell-immersive .mini-player {
   display: none;
+}
+.shell-immersive .shell-main {
+  padding-left: 0;
 }
 
 /* ── Library ──────────────────────────────────────────────────────────── */
@@ -1497,10 +1561,18 @@ input:focus {
 .reader-frame {
   flex: 1;
   min-width: 0;
+  /* Readium injects its page iframes as position:absolute children of this
+     element. Unpositioned, they sized themselves against some outer ancestor
+     (1040px inside a 957px frame) and spilled over the page-turn arrow, which
+     then couldn't be clicked. Positioned + clipped, they fit the frame. */
+  position: relative;
+  overflow: hidden;
 }
 /* @readium/navigator mounts an iframe (or two, for a two-page spread) into
    this container itself — sized here, not by the iframe's own attributes. */
 .reader-frame iframe {
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   border: none;
@@ -1519,18 +1591,59 @@ input:focus {
   background: var(--surface-2);
 }
 
-.reader-progress {
+/* Phone-sized windows: the fixed ☰ menu button sits at the top-left, so give the
+   header room for it; and a two-page spread doesn't fit, so drop that switch. */
+@media (max-width: 56rem) {
+  .reader-head {
+    padding-left: 3.6rem;
+  }
+}
+.reader-font-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* 1-page / 2-page switch: two buttons that read as one control. */
+.reader-seg {
+  display: flex;
+}
+.reader-seg .reader-font-btn {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.5rem 1rem;
-  border-top: 1px solid var(--line);
-  flex: none;
+  justify-content: center;
 }
-.reader-progress-bar {
-  flex: 1;
+.reader-seg .reader-font-btn:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.reader-seg .reader-font-btn:last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+}
+/* Declared after the base rules above so it wins: a two-page spread doesn't
+   fit a phone-sized window. */
+@media (max-width: 40rem) {
+  .reader-seg {
+    display: none;
+  }
+}
+
+/* ── Reader bottom bar ─────────────────────────────────────────────────── */
+/* A thin progress line is always visible; the controls fade in on hover (or
+   keyboard focus, or while the chapter list is open). The hover target is the
+   bar's own strip UNDER the book — hovering over the book itself can't be seen
+   from here (the book is an iframe, which swallows its own mouse events). */
+.reader-bottom {
+  position: relative;
+  flex: none;
+  height: 2.5rem;
+}
+.reader-progress-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   height: 3px;
-  border-radius: 999px;
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -1538,11 +1651,88 @@ input:focus {
   height: 100%;
   background: var(--accent);
 }
+.reader-controls {
+  position: absolute;
+  inset: 0 0 3px 0;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0 1rem;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.reader-bottom:hover .reader-controls,
+.reader-bottom:focus-within .reader-controls,
+.reader-bottom.open .reader-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+.reader-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .reader-progress-pct {
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+  text-align: right;
+}
+
+/* Chapter list, opening upward from the bar. */
+.reader-panel {
+  position: absolute;
+  left: 1rem;
+  bottom: calc(100% + 0.4rem);
+  z-index: 5;
+  width: min(26rem, calc(100% - 2rem));
+  max-height: min(60vh, 28rem);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 0.4rem;
+}
+.reader-panel-title {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0.4rem 0.8rem 0.5rem;
+}
+.reader-panel-empty {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  padding: 0.4rem 0.8rem 0.6rem;
+  margin: 0;
+}
+.reader-panel-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  font-family: var(--sans);
+  font-size: 0.88rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.reader-panel-item:hover {
+  background: var(--surface-2);
+}
+.reader-panel-item.active {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .reader-resume-notice {

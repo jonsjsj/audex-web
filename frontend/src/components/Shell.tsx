@@ -36,6 +36,17 @@ export interface ShellContext {
 // their own headers and aren't searched, so the bar is hidden there.
 const SEARCHABLE_PATHS = new Set(["/", "/series", "/authors", "/narrators"]);
 
+// Whether the side nav is tucked away (desktop). A per-device convenience, so
+// localStorage — and every access guarded, since storage can be blocked.
+const COLLAPSED_KEY = "audexweb.sidebarCollapsed";
+function loadCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** The persistent side nav — every page lives inside this now, Player and
  *  Reader included: a visible "you are here" rail beats an empty full-bleed
  *  page, and it's one less back-button to build per page. */
@@ -49,6 +60,18 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const [search, setSearch] = useState("");
   const [resetSignal, setResetSignal] = useState(0);
   const [immersive, setImmersive] = useState(false);
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+
+  function toggleCollapsed() {
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem(COLLAPSED_KEY, v ? "0" : "1");
+      } catch {
+        /* doesn't stick across visits — fine */
+      }
+      return !v;
+    });
+  }
 
   const loadLibraries = () => {
     api
@@ -89,14 +112,22 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const showSearch = SEARCHABLE_PATHS.has(location.pathname);
 
   return (
-    <div className={`shell ${immersive ? "shell-immersive" : ""}`}>
+    <div className={`shell ${immersive ? "shell-immersive" : ""} ${collapsed ? "shell-collapsed" : ""}`}>
       <button className="shell-menu-toggle" aria-label="Toggle menu" onClick={() => setNavOpen((v) => !v)}>
         ☰
       </button>
+      <button className="shell-sidebar-reveal" onClick={toggleCollapsed} aria-label="Show menu" title="Show menu">
+        ☰
+      </button>
       <aside className={`shell-sidebar ${navOpen ? "open" : ""}`}>
-        <button className="brand shell-brand shell-brand-btn" onClick={goHome} aria-label="Back to start">
-          Aud<em>ex</em>
-        </button>
+        <div className="shell-brandrow">
+          <button className="brand shell-brand shell-brand-btn" onClick={goHome} aria-label="Back to start">
+            Aud<em>ex</em>
+          </button>
+          <button className="shell-collapse" onClick={toggleCollapsed} aria-label="Hide menu" title="Hide menu">
+            «
+          </button>
+        </div>
 
         {libraries && libraries.length > 1 && (
           <select

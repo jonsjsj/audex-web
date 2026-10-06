@@ -237,7 +237,7 @@ export const api = {
 
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
-    request<{ locator: ReadiumLocator | null }>(`/api/read/${itemId}/position`),
+    request<{ locator: ReadiumLocator | null; progress?: number }>(`/api/read/${itemId}/position`),
   saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
   discardReadProgress: (itemId: string) =>

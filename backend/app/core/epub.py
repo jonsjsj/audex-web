@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import posixpath
+import re
 import zipfile
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
@@ -260,6 +261,25 @@ def _toc_to_rwpm(entries: list[TocEntry]) -> list[dict]:
     return out
 
 
+_DROP_BLOCKS_RE = re.compile(r"<(script|style|nav)\b.*?</\1\s*>", re.S | re.I)
+_TAG_RE = re.compile(r"<[^>]*>", re.S)
+
+
+def _text_length(pub: ParsedEpub, zip_path: str) -> int:
+    """Roughly how much READABLE text one spine document holds — script/style/nav
+    dropped, tags stripped, whitespace collapsed (the same shape of flattening the
+    alignment service uses, see docs/SYNC_API.md §3, though not byte-identical:
+    this is a weight for working out "how far through the book", not an offset
+    anything indexes into). Never 0, so a book of empty-looking documents can't
+    divide by zero downstream."""
+    try:
+        raw = pub.zf.read(zip_path).decode("utf-8", "ignore")
+    except KeyError:
+        return 1
+    raw = _DROP_BLOCKS_RE.sub(" ", raw)
+    return max(1, len(" ".join(_TAG_RE.sub("", raw).split())))
+
+
 def build_manifest(pub: ParsedEpub, self_url: str) -> dict:
     """RWPM JSON — see https://readium.org/webpub-manifest/. Every href here is
     a plain zip-relative path (e.g. "OEBPS/chapter1.xhtml"), NOT prefixed with
@@ -270,8 +290,17 @@ def build_manifest(pub: ParsedEpub, self_url: str) -> dict:
     prefix once, as HttpFetcher's own baseUrl constructor argument, instead.
     [self_url] is this manifest's own URL, for the `self` link Manifest reads
     its .baseURL from — unrelated to, and NOT joined through, HttpFetcher."""
+    # `properties.audexChars` is this server's own addition (RWPM allows extra
+    # properties): each chapter's text length, so the reader can turn "chapter 3,
+    # 40% through it" into an honest whole-book fraction. Without it the only
+    # position Readium can offer is chapter-granular — a book with a few long
+    # chapters would sit on one percentage for hours.
     reading_order = [
-        {"href": pub.manifest[item_id].href, "type": pub.manifest[item_id].media_type}
+        {
+            "href": pub.manifest[item_id].href,
+            "type": pub.manifest[item_id].media_type,
+            "properties": {"audexChars": _text_length(pub, pub.manifest[item_id].href)},
+        }
         for item_id in pub.spine_order
     ]
     resources = [

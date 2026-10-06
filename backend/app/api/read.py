@@ -138,17 +138,27 @@ async def get_position(
         prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
+    # The saved whole-book fraction, independent of the locator. A locator written
+    # by ANOTHER client (the Audex app's epubcfi, Codex echoing one back) isn't
+    # something this reader can open, but `ebookProgress` is client-neutral — it
+    # lets the reader still resume at the right percentage instead of page one.
+    try:
+        progress = max(0.0, min(1.0, float((prog or {}).get("ebookProgress") or 0)))
+    except (TypeError, ValueError):
+        progress = 0.0
     raw = prog.get("ebookLocation") if prog else None
     if not raw:
-        return {"locator": None}
+        return {"locator": None, "progress": progress}
     try:
         locator = json.loads(raw)
+        if not isinstance(locator, dict):
+            locator = None
     except (TypeError, ValueError):
         # A locator written by a different client in a format we don't
         # recognise (e.g. an epubcfi string from the mobile app's own
-        # reader) — resuming from scratch beats crashing the reader open.
+        # reader) — fall back to `progress` above rather than crashing.
         locator = None
-    return {"locator": locator}
+    return {"locator": locator, "progress": progress}
 
 
 class SavePositionBody(BaseModel):

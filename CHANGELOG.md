@@ -7,6 +7,42 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.6.0] - 2026-10-06
+
+### Fixed
+- **A+ / A- never changed the text size.** Readium's font-size setting is a
+  multiplier (1 = 100%, valid range 0.7–4), but the Reader handed it the
+  percentage (`100`, `112.5`, `175`…); Readium silently drops an out-of-range
+  value, so the buttons did nothing. The stored percentage is now converted.
+- **The page-turn arrows couldn't be clicked.** The book's frame was sized
+  wider than its container and spilled over the right-hand arrow, swallowing
+  the click. It's now contained.
+- **Reading progress only moved a chapter at a time.** The Reader's position
+  list has one entry per chapter, so a book with a few long chapters sat on
+  one percentage for hours — which is also all Audiobookshelf (and so Codex)
+  was ever told. Progress is now worked out from where you are *inside* the
+  chapter (the server sends each chapter's text length with the manifest), so
+  the percentage moves page by page and that finer number is what's saved as
+  `ebookProgress`.
+- **Opening a book now resumes at the right place when the saved position came
+  from another app.** The Audex app and Codex store their own location format,
+  which the web reader can't open — it used to start at page one even though
+  the saved percentage was, say, 50%. It now resumes at that percentage.
+
+### Added
+- **Hide the side menu.** A button next to the Audex logo collapses the side
+  menu on every page (and a small ☰ brings it back); it remembers your choice.
+- **One page / two pages.** A switch in the Reader header chooses single-page
+  or two-page-spread layout (remembered per device).
+- **Keyboard paging:** ← → and PageUp / PageDown, plus **Space** (forward) and
+  **Shift+Space** (back). These work while focus is inside the book itself, not
+  just on the page around it.
+- **A bottom bar that appears when you mouse over the bottom of the Reader**
+  with a progress slider you can drag or click to jump anywhere in the book,
+  and a **Chapters** list (current chapter highlighted) built from the book's
+  table of contents. The chapter name in the header now comes from the same
+  table of contents, so it stays correct after a jump.
+
 ## [0.5.3] - 2026-10-06
 
 ### Added

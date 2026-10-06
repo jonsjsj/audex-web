@@ -6,6 +6,7 @@ import { api, BookDetail } from "../api/client";
 import { useShell } from "../components/Shell";
 import { useReadAlong } from "../lib/useReadAlong";
 import { progressionAt, timeAtProgression } from "../lib/syncMap";
+import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -13,13 +14,69 @@ import { progressionAt, timeAtProgression } from "../lib/syncMap";
 // zip-relative paths, not pre-joined with this prefix).
 const RES_BASE = (itemId: string) => `/api/read/${itemId}/res/`;
 
-const FONT_SIZES = [87.5, 100, 112.5, 125, 137.5, 150, 175, 200]; // percent, Readium's own default preset steps
-const SAVE_DEBOUNCE_MS = 2000;
+// Percent — what's stored in the user's settings (and what every client
+// writes). Readium itself does NOT take a percent: its fontSize preference is
+// a MULTIPLIER (1 = 100%) and only accepts 0.7–4. Handing it 100 or 175 made
+// it silently drop the value as out of range, so A+/A- never changed the text.
+const FONT_SIZES = [87.5, 100, 112.5, 125, 137.5, 150, 175, 200];
+const toReadiumFontSize = (percent: number) => percent / 100;
 
-/** The position-list entry closest to progression [p] — there's no direct
- *  "Locator from progression" constructor in @readium/shared, so both the
- *  ?atProgression= jump and the auto-resume-from-audio effect below pick the
- *  nearest entry from Readium's own fixed-size position list instead. */
+type PageCount = 1 | 2;
+const PAGES_KEY = "audexweb.reader.pages";
+function loadPages(): PageCount {
+  try {
+    return localStorage.getItem(PAGES_KEY) === "2" ? 2 : 1;
+  } catch {
+    return 1; // storage blocked — per-device convenience only, the default is fine
+  }
+}
+
+const SAVE_DEBOUNCE_MS = 2000;
+// How far a saved locator may disagree with the saved percentage before the
+// percentage wins. We always write the two together, so a gap means ANOTHER
+// client (the Audex app, Codex's cross-edition sync) moved the position since.
+const POSITION_DISAGREE = 0.02;
+
+// Readium keyboard "peripherals": key presses INSIDE the book's iframe never
+// reach this page's own key handlers (they stay in the iframe's document), so
+// Readium forwards the combos named here to the `peripheral` listener below.
+// Modifiers must match exactly (an unlisted one means "not pressed"), which is
+// what lets Space and Shift+Space be separate next/previous combos.
+const KEY_NEXT = "audex-next";
+const KEY_PREV = "audex-prev";
+const KEY_ESCAPE = "audex-escape";
+const KEY_FULLSCREEN = "audex-fullscreen";
+const KEYBOARD_PERIPHERALS = [
+  { type: KEY_NEXT, keyCombos: [{ keyCode: 39 }, { keyCode: 34 }, { keyCode: 32 }] }, // →  PageDown  Space
+  { type: KEY_PREV, keyCombos: [{ keyCode: 37 }, { keyCode: 33 }, { keyCode: 32, shift: true }] }, // ←  PageUp  Shift+Space
+  { type: KEY_ESCAPE, keyCombos: [{ keyCode: 27 }] },
+  { type: KEY_FULLSCREEN, keyCombos: [{ keyCode: 70 }] }, // F
+];
+
+interface TocItem {
+  title: string;
+  href: string; // zip-relative path, optionally with a #fragment
+  depth: number;
+}
+
+/** The manifest's nested table of contents, flattened for a simple indented list. */
+function flattenToc(raw: unknown, depth = 0): TocItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TocItem[] = [];
+  for (const e of raw as { title?: unknown; href?: unknown; children?: unknown }[]) {
+    if (typeof e?.href === "string") {
+      const title = typeof e.title === "string" && e.title.trim() ? e.title.trim() : "Untitled";
+      out.push({ title, href: e.href, depth });
+    }
+    out.push(...flattenToc(e?.children, depth + 1));
+  }
+  return out;
+}
+
+/** The position-list entry closest to progression [p] — only the fallback now,
+ *  for a server too old to send chapter lengths (see lib/readerProgress.ts):
+ *  Readium's own position list is chapter-granular, so this can only ever land
+ *  on a chapter start. */
 function nearestLocatorForProgression(positions: Locator[], p: number): Locator | undefined {
   if (positions.length === 0) return undefined;
   return positions.reduce((best, loc) => {
@@ -28,6 +85,9 @@ function nearestLocatorForProgression(positions: Locator[], p: number): Locator 
     return Math.abs(locP - p) < Math.abs(bestP - p) ? loc : best;
   });
 }
+
+const prefsFor = (fontIdx: number, pages: PageCount) =>
+  new EpubPreferences({ fontSize: toReadiumFontSize(FONT_SIZES[fontIdx]), columnCount: pages });
 
 export default function Reader() {
   const { itemId } = useParams<{ itemId: string }>();
@@ -43,14 +103,27 @@ export default function Reader() {
   const [reportSent, setReportSent] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fontSizeIdx, setFontSizeIdx] = useState(1); // index into FONT_SIZES, 100% default
+  const [pages, setPages] = useState<PageCount>(loadPages);
   const [progressPct, setProgressPct] = useState<number | null>(null);
+  const [fraction, setFraction] = useState(0); // whole-book 0..1, drives the slider
+  const [scrub, setScrub] = useState<number | null>(null); // slider value while dragging, before it's committed
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
+  const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
+  const [toc, setToc] = useState<TocItem[]>([]);
+  const [panel, setPanel] = useState<"chapters" | null>(null);
   const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const hasAudio = (bookDetail?.numAudioFiles ?? 0) > 0;
   // Mirrors progressPct as a raw 0..1 fraction — progressPct is rounded for
   // display, too coarse to feed back into progressionAt/timeAtProgression.
   const progressionRef = useRef(0);
+  // Chapter lengths from the manifest, for whole-book progress (null → fall
+  // back to Readium's chapter-granular value).
+  const weightsRef = useRef<SpineWeights | null>(null);
+  // The latest preference values, readable from the async open() closure and
+  // from handlers without waiting on a re-render.
+  const fontIdxRef = useRef(1);
+  const pagesRef = useRef<PageCount>(pages);
   // Readium's fixed-size position list from this load — stashed for the
   // auto-resume effect below, which runs later (once the map arrives) and
   // needs the same list the initial ?atProgression= handling used.
@@ -71,6 +144,48 @@ export default function Reader() {
   const readAlongAnchorId = hasAudio ? itemId : bookDetail?.pairedItemId ?? undefined;
   const readAlong = useReadAlong(readAlongAnchorId, hasAudio || !!bookDetail?.pairedItemId);
 
+  /** Whole-book fraction for a Readium locator: chapter-weighted when the
+   *  server sent chapter lengths, otherwise Readium's own (coarser) value. */
+  function totalOf(loc: Locator): number {
+    const w = weightsRef.current;
+    const t = w ? totalFromLocation(w, loc.href.toString(), loc.locations?.progression ?? 0) : null;
+    return t ?? loc.locations?.totalProgression ?? 0;
+  }
+
+  /** A locator at whole-book fraction [total] — inside the right chapter at the
+   *  right depth when chapter lengths are known, else the nearest chapter start. */
+  function locatorAtTotal(total: number): Locator | undefined {
+    const w = weightsRef.current;
+    if (w) {
+      const at = locationFromTotal(w, total);
+      return new Locator({
+        href: at.href,
+        type: at.type,
+        // `position` isn't optional: Readium finds the page to open by looking
+        // this number up in the position list (one entry per chapter, numbered
+        // from 1 — see open()), and throws "Locator not found in position list"
+        // for a locator without one.
+        locations: new LocatorLocations({ position: at.index + 1, progression: at.progression, totalProgression: total }),
+      });
+    }
+    return nearestLocatorForProgression(positionsRef.current, total);
+  }
+
+  // Latest key-action handler, reachable from the long-lived listeners below
+  // (Readium's `peripheral` callback is created once, inside open()).
+  const actionRef = useRef<(action: string) => void>(() => {});
+  actionRef.current = (action) => {
+    if (action === KEY_NEXT) nextPage();
+    else if (action === KEY_PREV) prevPage();
+    else if (action === KEY_ESCAPE) {
+      if (panel) setPanel(null);
+      else if (immersive) exitImmersive();
+    } else if (action === KEY_FULLSCREEN) {
+      if (immersive) exitImmersive();
+      else enterImmersive();
+    }
+  };
+
   useEffect(() => {
     if (!itemId || !containerRef.current) return;
     let cancelled = false;
@@ -87,6 +202,9 @@ export default function Reader() {
         if (cancelled) return;
         if (detail) setBookDetail(detail);
 
+        weightsRef.current = buildSpineWeights(manifestJson);
+        setToc(flattenToc(manifestJson.toc));
+
         // A LOCAL var, not the fontSizeIdx STATE — this effect only runs once
         // per itemId (mount), so the closure below would otherwise always
         // construct with whatever fontSizeIdx was at mount time (the
@@ -100,6 +218,7 @@ export default function Reader() {
             0,
           );
         }
+        fontIdxRef.current = initialFontIdx;
 
         const manifest = Manifest.deserialize(manifestJson);
         if (!manifest) throw new Error("This book's manifest couldn't be read.");
@@ -118,8 +237,7 @@ export default function Reader() {
         // that has no saved reading position yet. One synthetic locator per
         // reading-order item (chapter-start granularity, not real pagination)
         // is enough to keep the navigator's own fallback from ever landing on
-        // undefined, and gives ?atProgression=/auto-resume something to
-        // target too.
+        // undefined. (Real in-chapter progress comes from weightsRef, not this.)
         let positions = await pub.positionsFromManifest();
         if (positions.length === 0) {
           const items = pub.readingOrder.items;
@@ -135,6 +253,7 @@ export default function Reader() {
         }
         positionsRef.current = positions;
 
+        // Where to open: an explicit read-along jump, else the saved position.
         // A read-along "jump to text" link (Player.tsx) arrives as
         // ?atProgression=<0..1> — it overrides the saved position for this
         // one load.
@@ -143,7 +262,7 @@ export default function Reader() {
         let initialLocator: Locator | undefined;
         if (atProgression !== null && Number.isFinite(atProgression) && positions.length > 0) {
           explicitProgressionRef.current = true;
-          initialLocator = nearestLocatorForProgression(positions, atProgression);
+          initialLocator = locatorAtTotal(atProgression);
           // Consume the param so a refresh resumes from the real saved
           // position instead of re-jumping back here every time.
           setSearchParams(
@@ -155,7 +274,18 @@ export default function Reader() {
             { replace: true },
           );
         } else {
-          initialLocator = positionRes.locator ? Locator.deserialize(positionRes.locator) : undefined;
+          const saved = positionRes.locator ? Locator.deserialize(positionRes.locator) : undefined;
+          const savedFraction = positionRes.progress ?? 0;
+          if (saved && Math.abs(totalOf(saved) - savedFraction) <= POSITION_DISAGREE) {
+            initialLocator = saved; // our own, precise position — still in step with the saved %
+          } else if (savedFraction > 0.005) {
+            // No locator we can open (the Audex app writes its own format) or one
+            // that's out of step with the % another client has since written:
+            // the percentage is the part every client agrees on.
+            initialLocator = locatorAtTotal(savedFraction);
+          } else {
+            initialLocator = saved;
+          }
         }
 
         const listeners: EpubNavigatorListeners = {
@@ -170,12 +300,14 @@ export default function Reader() {
             // on every book open.
             const loc = nav?.currentLocator ?? locator;
             if (!loc?.locations) return;
-            progressionRef.current = loc.locations.totalProgression ?? 0;
-            setProgressPct(
-              loc.locations.totalProgression != null ? Math.round(loc.locations.totalProgression * 100) : null,
-            );
+            const total = totalOf(loc);
+            progressionRef.current = total;
+            setFraction(total);
+            setProgressPct(Math.round(total * 100));
             setChapterTitle(loc.title ?? null);
-            queueSave(itemId!, loc);
+            const w = weightsRef.current;
+            if (w) setCurrentIdx(Math.max(0, w.hrefs.indexOf(loc.href.toString().split("#")[0])));
+            queueSave(itemId!, loc, total);
           },
           timelineItemChanged: () => {},
           tap: () => false,
@@ -188,7 +320,7 @@ export default function Reader() {
           textSelected: () => {},
           contentProtection: () => {},
           contextMenu: () => {},
-          peripheral: () => {},
+          peripheral: (data) => actionRef.current(data.type),
         };
 
         nav = new EpubNavigator(
@@ -197,7 +329,11 @@ export default function Reader() {
           listeners,
           positions,
           initialLocator,
-          { preferences: new EpubPreferences({ fontSize: FONT_SIZES[initialFontIdx] }), defaults: {} },
+          {
+            preferences: prefsFor(initialFontIdx, pagesRef.current),
+            defaults: {},
+            keyboardPeripherals: KEYBOARD_PERIPHERALS,
+          },
         );
         await nav.load();
         if (cancelled) {
@@ -242,7 +378,7 @@ export default function Reader() {
     if (bookDetail.numAudioFiles === 0 || bookDetail.audioProgress <= bookDetail.ebookProgress) return;
     const targetP = progressionAt(readAlong.map, bookDetail.audioTimeS);
     if (targetP === null || targetP - progressionRef.current <= 0.01) return; // not meaningfully ahead
-    const target = nearestLocatorForProgression(positionsRef.current, targetP);
+    const target = locatorAtTotal(targetP);
     if (!target) return;
     navRef.current.go(target, true, () => {});
     setResumeNotice("Resumed from your listening progress");
@@ -250,21 +386,25 @@ export default function Reader() {
   }, [readAlong.map, bookDetail]);
 
   // Debounced, not on every positionChanged — a fast page-turner would
-  // otherwise fire a PATCH per page. Coalesces to the LATEST locator only:
+  // otherwise fire a PATCH per page. Coalesces to the LATEST position only:
   // fine to drop an intermediate position, never fine to drop the final one
   // (the unmount cleanup above flushes it synchronously on the way out).
-  const pendingLocatorRef = useRef<Locator | null>(null);
-  function queueSave(id: string, locator: Locator) {
-    pendingLocatorRef.current = locator;
+  const pendingRef = useRef<{ locator: Locator; total: number } | null>(null);
+  function queueSave(id: string, locator: Locator, total: number) {
+    pendingRef.current = { locator, total };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => flushSave(id), SAVE_DEBOUNCE_MS);
   }
   function flushSave(id: string) {
-    const locator = pendingLocatorRef.current;
-    if (!locator) return;
-    pendingLocatorRef.current = null;
-    const progress = locator.locations?.totalProgression ?? 0;
-    api.saveReadPosition(id, { locator: locator.serialize(), progress }).catch(() => {});
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    // Readium's own totalProgression in the saved locator is chapter-granular;
+    // overwrite it with the whole-book fraction so anything reading the stored
+    // locator (not just ebookProgress) sees the real number.
+    const locator = pending.locator.serialize() as { locations?: { totalProgression?: number } };
+    if (locator.locations) locator.locations.totalProgression = pending.total;
+    api.saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total }).catch(() => {});
   }
 
   function prevPage() {
@@ -274,12 +414,63 @@ export default function Reader() {
     navRef.current?.goForward(true, () => {});
   }
 
+  /** Header/toolbar buttons hand focus back to the page after a click, so Space
+   *  and the arrow keys keep turning pages instead of re-pressing the button
+   *  you last clicked. */
+  const act = (fn: () => void) => (e: React.MouseEvent<HTMLElement>) => {
+    fn();
+    e.currentTarget.blur();
+  };
+
   async function changeFontSize(delta: number) {
-    const idx = Math.max(0, Math.min(FONT_SIZES.length - 1, fontSizeIdx + delta));
-    if (idx === fontSizeIdx || !navRef.current) return;
+    const idx = Math.max(0, Math.min(FONT_SIZES.length - 1, fontIdxRef.current + delta));
+    if (idx === fontIdxRef.current || !navRef.current) return;
+    fontIdxRef.current = idx;
     setFontSizeIdx(idx);
-    await navRef.current.submitPreferences(new EpubPreferences({ fontSize: FONT_SIZES[idx] }));
+    await navRef.current.submitPreferences(prefsFor(idx, pagesRef.current));
     api.updateSettings({ readerFontSize: FONT_SIZES[idx] }).catch(() => {});
+  }
+
+  async function changePages(count: PageCount) {
+    if (count === pagesRef.current) return;
+    pagesRef.current = count;
+    setPages(count);
+    try {
+      localStorage.setItem(PAGES_KEY, String(count));
+    } catch {
+      /* per-device convenience only — fine if it doesn't stick */
+    }
+    await navRef.current?.submitPreferences(prefsFor(fontIdxRef.current, count));
+  }
+
+  /** Jump to a chapter from the Chapters list. */
+  function goToc(item: TocItem) {
+    const [base, fragment] = item.href.split("#");
+    const w = weightsRef.current;
+    const at = w ? w.hrefs.indexOf(base) : -1;
+    navRef.current?.go(
+      new Locator({
+        href: base,
+        type: at >= 0 && w ? w.types[at] : "application/xhtml+xml",
+        locations: new LocatorLocations({
+          fragments: fragment ? [fragment] : [],
+          progression: 0,
+          position: at >= 0 ? at + 1 : undefined,
+        }),
+      }),
+      true,
+      () => {},
+    );
+    setPanel(null);
+  }
+
+  /** The slider was released: go to wherever it was dragged to. */
+  function commitSeek(e: React.SyntheticEvent<HTMLInputElement>) {
+    const value = Number(e.currentTarget.value) / 1000;
+    setScrub(null);
+    e.currentTarget.blur(); // hand the arrow keys back to page turning
+    const target = locatorAtTotal(value);
+    if (target) navRef.current?.go(target, true, () => {});
   }
 
   /** Navigate to the player at the point the text has reached — the reader-
@@ -329,15 +520,47 @@ export default function Reader() {
     };
   }, [setImmersive]);
 
-  function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowRight" || e.key === "PageDown") nextPage();
-    else if (e.key === "ArrowLeft" || e.key === "PageUp") prevPage();
-    else if (e.key === "Escape" && immersive) exitImmersive(); // in-app immersive when the browser refused fullscreen
-    else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (immersive) exitImmersive();
-      else enterImmersive();
+  // ── Keyboard ────────────────────────────────────────────────────────────
+  // This covers focus ANYWHERE on the page (the header, the bottom bar, the
+  // empty margins); a key pressed while focus is inside the book itself goes
+  // through Readium's peripherals instead (KEYBOARD_PERIPHERALS above).
+  // Text fields, selects and the progress slider keep their own arrow keys,
+  // and Space leaves a focused button/link alone so it still activates.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      let action: string | null = null;
+      switch (e.key) {
+        case "ArrowRight":
+        case "PageDown":
+          action = KEY_NEXT;
+          break;
+        case "ArrowLeft":
+        case "PageUp":
+          action = KEY_PREV;
+          break;
+        case " ":
+          if (tag === "BUTTON" || tag === "A") return;
+          action = e.shiftKey ? KEY_PREV : KEY_NEXT;
+          break;
+        case "Escape":
+          action = KEY_ESCAPE;
+          break;
+        case "f":
+        case "F":
+          action = KEY_FULLSCREEN;
+          break;
+      }
+      if (!action) return;
+      e.preventDefault(); // Space/PageDown would otherwise scroll the app page behind the book
+      actionRef.current(action);
     }
-  }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const [discarding, setDiscarding] = useState(false);
   async function discardProgress() {
@@ -349,7 +572,7 @@ export default function Reader() {
       // the unmount-flush below firing afterward would PATCH the position
       // straight back, resurrecting what was just cleared.
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      pendingLocatorRef.current = null;
+      pendingRef.current = null;
       await api.discardReadProgress(itemId);
       navigate("/");
     } catch (e) {
@@ -379,15 +602,31 @@ export default function Reader() {
     );
   }
 
+  // The chapter-list entry for where you are: the last one that starts at or
+  // before the chapter on screen.
+  let activeToc = -1;
+  const weights = weightsRef.current;
+  if (weights) {
+    toc.forEach((t, i) => {
+      const at = weights.hrefs.indexOf(t.href.split("#")[0]);
+      if (at >= 0 && at <= currentIdx) activeToc = i;
+    });
+  }
+  const shownFraction = scrub ?? fraction;
+  // The chapter name for the header comes from the table of contents, not from
+  // the locator Readium reports: a locator we built ourselves (a chapter-list
+  // pick, the slider, a resume from a saved %) carries no title of its own.
+  const shownChapter = (activeToc >= 0 ? toc[activeToc]?.title : null) ?? chapterTitle;
+
   return (
-    <div className="reader-wrap" onKeyDown={onKeyDown} tabIndex={-1}>
+    <div className="reader-wrap" tabIndex={-1}>
       <header className="reader-head">
         <button className="reader-back" onClick={() => navigate("/")}>
           ← Library
         </button>
         <div className="reader-head-title">
           <span className="reader-book-title">{title}</span>
-          {chapterTitle && <span className="reader-chapter-title"> · {chapterTitle}</span>}
+          {shownChapter && <span className="reader-chapter-title"> · {shownChapter}</span>}
         </div>
         <div className="reader-head-right">
           {(hasAudio || bookDetail?.pairedItemId) && (
@@ -400,18 +639,55 @@ export default function Reader() {
               🎧 Listen
             </button>
           )}
-          <button className="reader-font-btn" onClick={() => changeFontSize(-1)} aria-label="Smaller text" disabled={fontSizeIdx === 0}>
+          <button
+            className="reader-font-btn"
+            onClick={act(() => changeFontSize(-1))}
+            aria-label="Smaller text"
+            title={`Smaller text (now ${FONT_SIZES[fontSizeIdx]}%)`}
+            disabled={fontSizeIdx === 0}
+          >
             A-
           </button>
-          <button className="reader-font-btn" onClick={() => changeFontSize(1)} aria-label="Larger text" disabled={fontSizeIdx === FONT_SIZES.length - 1}>
+          <button
+            className="reader-font-btn"
+            onClick={act(() => changeFontSize(1))}
+            aria-label="Larger text"
+            title={`Larger text (now ${FONT_SIZES[fontSizeIdx]}%)`}
+            disabled={fontSizeIdx === FONT_SIZES.length - 1}
+          >
             A+
           </button>
-          <button className="reader-font-btn" onClick={discardProgress} disabled={discarding} aria-label="Discard progress">
+          <div className="reader-seg" role="group" aria-label="Pages per view">
+            <button
+              className={`reader-font-btn ${pages === 1 ? "active" : ""}`}
+              onClick={act(() => changePages(1))}
+              aria-label="One page"
+              aria-pressed={pages === 1}
+              title="One page at a time"
+            >
+              <svg width="12" height="14" viewBox="0 0 12 14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                <rect x="1.5" y="1.5" width="9" height="11" rx="1" />
+              </svg>
+            </button>
+            <button
+              className={`reader-font-btn ${pages === 2 ? "active" : ""}`}
+              onClick={act(() => changePages(2))}
+              aria-label="Two pages"
+              aria-pressed={pages === 2}
+              title="Two pages side by side"
+            >
+              <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                <rect x="1.5" y="1.5" width="7.5" height="11" rx="1" />
+                <rect x="11" y="1.5" width="7.5" height="11" rx="1" />
+              </svg>
+            </button>
+          </div>
+          <button className="reader-font-btn" onClick={act(discardProgress)} disabled={discarding} aria-label="Discard progress">
             {discarding ? "…" : "⟲"}
           </button>
           <button
             className="reader-font-btn"
-            onClick={immersive ? exitImmersive : enterImmersive}
+            onClick={act(immersive ? exitImmersive : enterImmersive)}
             aria-label={immersive ? "Exit full screen" : "Full screen"}
             title={immersive ? "Exit full screen (Esc)" : "Full screen (F)"}
           >
@@ -429,23 +705,14 @@ export default function Reader() {
       {loading && <p className="sub" style={{ padding: "2rem" }}>Loading…</p>}
 
       <div className="reader-frame-wrap">
-        <button className="reader-nav-edge reader-nav-prev" onClick={prevPage} aria-label="Previous page">
+        <button className="reader-nav-edge reader-nav-prev" onClick={act(prevPage)} aria-label="Previous page">
           ‹
         </button>
         <div ref={containerRef} className="reader-frame" />
-        <button className="reader-nav-edge reader-nav-next" onClick={nextPage} aria-label="Next page">
+        <button className="reader-nav-edge reader-nav-next" onClick={act(nextPage)} aria-label="Next page">
           ›
         </button>
       </div>
-
-      {progressPct !== null && (
-        <div className="reader-progress">
-          <div className="reader-progress-bar">
-            <div className="reader-progress-fill" style={{ width: `${progressPct}%` }} />
-          </div>
-          <span className="reader-progress-pct">{progressPct}%</span>
-        </div>
-      )}
 
       {resumeNotice && <p className="reader-resume-notice">{resumeNotice}</p>}
 
@@ -464,6 +731,57 @@ export default function Reader() {
           {readAlong.error && <span className="reader-readalong-status">{readAlong.error}</span>}
         </div>
       )}
+
+      {/* Bottom bar: a thin progress line is always there; the controls appear
+          when the mouse is over it (or focus is inside it, or the chapter list
+          is open). */}
+      <div className={`reader-bottom ${panel ? "open" : ""}`}>
+        {panel === "chapters" && (
+          <div className="reader-panel" role="dialog" aria-label="Chapters">
+            <div className="reader-panel-title">Chapters</div>
+            {toc.length === 0 ? (
+              <p className="reader-panel-empty">This book has no table of contents.</p>
+            ) : (
+              toc.map((t, i) => (
+                <button
+                  key={`${t.href}-${i}`}
+                  className={`reader-panel-item ${i === activeToc ? "active" : ""}`}
+                  style={{ paddingLeft: `${0.8 + t.depth * 0.9}rem` }}
+                  onClick={act(() => goToc(t))}
+                >
+                  {t.title}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        <div className="reader-controls">
+          <button
+            className="reader-font-btn"
+            onClick={act(() => setPanel((p) => (p === "chapters" ? null : "chapters")))}
+            aria-expanded={panel === "chapters"}
+          >
+            ☰ Chapters
+          </button>
+          <input
+            className="reader-slider"
+            type="range"
+            min={0}
+            max={1000}
+            value={Math.round(shownFraction * 1000)}
+            onChange={(e) => setScrub(Number(e.target.value) / 1000)}
+            onPointerUp={commitSeek}
+            onKeyUp={(e) => {
+              if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) commitSeek(e);
+            }}
+            aria-label="Reading progress"
+          />
+          <span className="reader-progress-pct">{Math.round(shownFraction * 100)}%</span>
+        </div>
+        <div className="reader-progress-line" aria-hidden>
+          <div className="reader-progress-fill" style={{ width: `${(progressPct === null ? 0 : fraction) * 100}%` }} />
+        </div>
+      </div>
     </div>
   );
 }
