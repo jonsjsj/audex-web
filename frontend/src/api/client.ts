@@ -103,6 +103,9 @@ export interface MetadataEdit {
   alsoPaired?: boolean;
 }
 
+/** What happened when a merge / separation made here was passed on to Codex. */
+export type CodexMergeState = "ok" | "already" | "off" | "not-linked" | "not-in-codex" | "merged-in-codex" | "failed";
+
 export interface UpdateCheck {
   currentVersion: string;
   latestVersion: string | null;
@@ -277,9 +280,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
   linkEditions: (itemId: string, otherId: string) =>
-    request<{ ok: true; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
+    request<{ ok: true; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed"; codexMerge?: CodexMergeState }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
   unlinkEditions: (itemId: string, otherId: string) =>
-    request<{ ok: true }>(`/api/library/items/${itemId}/unlink`, { method: "POST", body: JSON.stringify({ otherId }) }),
+    request<{ ok: true; codexMerge?: CodexMergeState }>(`/api/library/items/${itemId}/unlink`, { method: "POST", body: JSON.stringify({ otherId }) }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>

@@ -170,12 +170,58 @@ _BOOK_N_TAIL_RE = re.compile(r"[,]?\s*\b(book|vol|vol\.|volume)\s+\d+(\.\d+)?$")
 _NUM_TOKEN_RE = re.compile(r"(?<![a-z])\d+(?:\.\d+)?(?![a-z])")
 
 
-def title_segments(title: str) -> list[str]:
-    """The title cut into its ':'-separated parts, each normalized, with the
-    parts publishers vary freely ("A Novel", "Book One of X", "…, Book 13")
-    dropped. ABS items for the same work are often titled differently per
-    edition — "Name 13: A LitRPG Adventure" vs "Name 13: A LitRPG Adventure:
-    Name, Book 13" — so identity is judged part by part (see _same_work)."""
+_SERIES_TRAILING_NUMBER_RE = re.compile(r"(\s*#\s*\d+(\.\d+)?|,?\s+book\s+\d+(\.\d+)?|\s+\d+(\.\d+)?)$")
+_SERIES_SUFFIX_WORD_RE = re.compile(
+    r"\s+(trilogy|quartet|quintet|sextet|saga|series|novels?|cycle|sequence|chronicles|companion books?)$"
+)
+_POSITION_SUFFIX_RE = re.compile(r"^(?P<stem>.+?)[,:]?\s+(book|vol\.?|volume)\s+(?P<num>\d+(\.\d+)?)$")
+_HASH_SUFFIX_RE = re.compile(r"^(?P<stem>.+?)\s*#(?P<num>\d+(\.\d+)?)$")
+
+
+def norm_series(name: str) -> str:
+    """Series identity key (port of Audex's Normalize.normSeries): drops a leading article, trailing marketing
+    words ("… Series", "… Trilogy") and trailing numbering ("#1", ", Book 2")."""
+    s = _basic(name)
+    s = _LEADING_ARTICLE_RE.sub("", s)
+    while True:
+        prev = s
+        s = _SERIES_TRAILING_NUMBER_RE.sub("", s)
+        s = _SERIES_SUFFIX_WORD_RE.sub("", s)
+        s = s.strip().rstrip(",:-\u2013 ")
+        if s == prev:
+            break
+    return _WHITESPACE_RE.sub(" ", _NON_ALNUM_RE.sub(" ", s).replace("#", " ")).strip()
+
+
+def recover_series_position(title: str, known: set[str]) -> tuple[str, float] | None:
+    """Series + position for an item whose own metadata has no series, found from its TITLE against the series
+    other items are known to be in (port of Audex's recoverSeriesPosition, plus the "<Series> 13: Subtitle"
+    form): "Dungeon Crawler Carl Book 3", "Cradle #1", "Unsouled (Cradle #1)", "He Who Fights with Monsters 13: …"."""
+    if not known:
+        return None
+    for m in _PARENTHETICAL_RE.finditer(title):
+        inner = _basic(m.group(0)[1:-1])  # the text inside the (…) or […]
+        hit = _HASH_SUFFIX_RE.match(inner) or _POSITION_SUFFIX_RE.match(inner)
+        if hit and norm_series(hit.group("stem")) in known:
+            return norm_series(hit.group("stem")), float(hit.group("num"))
+    flat = _basic(_PARENTHETICAL_RE.sub(" ", title))
+    for rx in (_POSITION_SUFFIX_RE, _HASH_SUFFIX_RE):
+        hit = rx.match(flat)
+        if hit and norm_series(hit.group("stem")) in known:
+            return norm_series(hit.group("stem")), float(hit.group("num"))
+    head = _WHITESPACE_RE.sub(" ", _NON_ALNUM_RE.sub(" ", _LEADING_ARTICLE_RE.sub("", flat)).replace("#", " ")).strip()
+    for series in sorted(known, key=len, reverse=True):
+        hit = re.match(rf"^{re.escape(series)}\s+(?:(?:book|vol|volume)\s+)?(\d+)(?:\s|$)", head)
+        if hit:
+            return series, float(hit.group(1))
+    return None
+
+
+def title_info(title: str, known: set[str] = frozenset()) -> tuple[list[str], set[str]]:
+    """(parts, volume numbers). The title cut into its ':'-separated parts, each normalized, with the parts
+    publishers vary freely ("A Novel", "Book One of X", "…, Book 13") dropped — and, like Audex, a leading
+    "<series> 13" part and any subtitle that just names the series, when the series is known. The volume numbers
+    are read from the FIRST part before that clean-up, so "Monsters 12" and "Monsters 13" never look alike."""
     raw = _PARENTHETICAL_RE.sub(" ", title)
     out: list[str] = []
     for part in _SEGMENT_SPLIT_RE.split(raw):
@@ -188,7 +234,17 @@ def title_segments(title: str) -> list[str]:
         p = _WHITESPACE_RE.sub(" ", _NON_ALNUM_RE.sub(" ", p).replace("#", " ")).strip()
         if p:
             out.append(p)
-    return out
+    numbers = _numbers(out[0]) if out else set()
+    if known and len(out) > 1 and norm_series(out[0]) in known:
+        out = out[1:]
+    if known and len(out) > 1:
+        kept = [seg for i, seg in enumerate(out) if i == 0 or not any(k and k in seg for k in known)]
+        out = kept or out
+    return out, numbers
+
+
+def title_segments(title: str, known: set[str] = frozenset()) -> list[str]:
+    return title_info(title, known)[0]
 
 
 def author_tokens(meta: dict) -> set[str]:
@@ -211,13 +267,13 @@ def author_tokens(meta: dict) -> set[str]:
 def series_keys(meta: dict) -> list[tuple[str, float | None]]:
     out: list[tuple[str, float | None]] = []
     for s in meta.get("series") or []:
-        name = norm_title(s.get("name") or "")
+        name = norm_series(s.get("name") or "")
         if name:
             out.append((name, _to_float(s.get("sequence"))))
     if not out and meta.get("seriesName"):
         m = _SERIES_SEQ_RE.match(str(meta["seriesName"]).strip())
         raw, seq = (m.group(1), _to_float(m.group(2))) if m else (str(meta["seriesName"]), None)
-        name = norm_title(raw)
+        name = norm_series(raw)
         if name:
             out.append((name, seq))
     return out
@@ -250,15 +306,13 @@ def _numbers(seg: str) -> set[str]:
     return set(_NUM_TOKEN_RE.findall(seg))
 
 
-def _title_score(ta: list[str], tb: list[str]) -> float:
-    """1.0 when one title's parts are a leading run of the other's (the same
-    work with a longer/shorter subtitle); otherwise Jaro-Winkler of the whole
-    normalized title. Two different volume numbers in the lead part always
-    score 0 — "Monsters 12" vs "Monsters 13" is a one-character difference to
-    a fuzzy matcher but a different book."""
+def _title_score(ia: tuple[list[str], set[str]], ib: tuple[list[str], set[str]]) -> float:
+    """1.0 when one title's parts are a leading run of the other's (the same work with a longer/shorter subtitle);
+    otherwise Jaro-Winkler of the whole normalized title. Two different volume numbers always score 0 —
+    "Monsters 12" vs "Monsters 13" is a one-character difference to a fuzzy matcher but a different book."""
+    (ta, na), (tb, nb) = ia, ib
     if not ta or not tb:
         return 0.0
-    na, nb = _numbers(ta[0]), _numbers(tb[0])
     if na and nb and na != nb:
         return 0.0
     n = min(len(ta), len(tb))
@@ -283,6 +337,8 @@ def pair_dual_format(entries: list[dict], joins=frozenset(), splits=frozenset())
     co-author lists differ between an ebook and its audiobook)."""
     ebooks: list[dict] = []
     audios: list[dict] = []
+    # Every series any item is known to be in — used to read a series + number out of a bare title.
+    known = {name for e in entries for name, _pos in series_keys(e["meta"])}
     for e in entries:
         book = e["book"]
         if book["numAudioFiles"] > 0 and book["hasEbook"]:
@@ -292,12 +348,17 @@ def pair_dual_format(entries: list[dict], joins=frozenset(), splits=frozenset())
             "book": book,
             "asin": (meta.get("asin") or "").strip().upper() or None,
             "isbn13": normalize_isbn(meta.get("isbn")),
-            "segments": title_segments(book["title"]),
+            "title": title_info(book["title"], known),
             "authors": author_tokens(meta),
             "series": series_keys(meta),
             "omnibus": is_omnibus(book["title"], book.get("subtitle")),
             "dramatized": is_dramatized(book["title"], book.get("subtitle")),
         }
+        omnibus = entry["omnibus"]
+        if not entry["series"]:
+            hit = recover_series_position(book["title"], known)
+            if hit:
+                entry["series"] = [(hit[0], None if omnibus else hit[1])]
         if book["hasEbook"]:
             ebooks.append(entry)
         elif book["numAudioFiles"] > 0:
@@ -308,7 +369,8 @@ def pair_dual_format(entries: list[dict], joins=frozenset(), splits=frozenset())
     # 1) The person's own joins — absolute.
     for i, e in enumerate(ebooks):
         for j, a in enumerate(audios):
-            if j in used_audio or frozenset((e["book"]["id"], a["book"]["id"])) not in joins:
+            pair = frozenset((e["book"]["id"], a["book"]["id"]))
+            if j in used_audio or pair not in joins or pair in splits:
                 continue
             used_ebook.add(i)
             used_audio.add(j)
@@ -334,16 +396,22 @@ def pair_dual_format(entries: list[dict], joins=frozenset(), splits=frozenset())
                 # so differing ids prove nothing — fall through to the title.
                 rel = _series_relation(e["series"], a["series"])
                 if rel == "conflict":
-                    continue
-                title = _title_score(e["segments"], a["segments"])
-                if title < ACCEPT_THRESHOLD:
-                    continue
+                    continue  # same series, different volume — certainly a different book
+                title = _title_score(e["title"], a["title"])
                 overlap = 0.0
                 if e["authors"] and a["authors"]:
                     overlap = len(e["authors"] & a["authors"]) / min(len(e["authors"]), len(a["authors"]))
-                if overlap <= 0.5 and rel != "same":
-                    continue
-                score = title + overlap + (0.5 if rel == "same" else 0.0)
+                if rel == "same":
+                    # Same series, same volume: that identifies the book (Audex's series-position rule) — the
+                    # titles may differ completely ("Dungeon Crawler Carl Book 3" vs "The Dungeon Anarchist's
+                    # Cookbook"). The authors must agree, unless the titles do (pen name vs real name).
+                    if overlap <= 0.5 and title < 0.8:
+                        continue
+                    score = 2.0 + overlap + title
+                else:
+                    if title < ACCEPT_THRESHOLD or overlap <= 0.5:
+                        continue
+                    score = title + overlap
             if score > best_score:
                 best_score, best_j = score, j
         if best_j is not None:

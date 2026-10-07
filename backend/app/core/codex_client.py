@@ -196,6 +196,37 @@ async def push_edit(codex_url: str, token: str, codex_id: int, fields: dict) -> 
         return False
 
 
+async def merge_works(codex_url: str, token: str, canonical_id: int, duplicate_id: int) -> tuple[bool, str]:
+    """Merge two Codex works into one (POST /media/dedupe/merge, the person's own key) — what a merge made in
+    Webdex or Audex must do in Codex too, so all three agree. Returns (ok, short reason)."""
+    return await _post_json(codex_url, token, "/media/dedupe/merge",
+                            {"canonical_id": canonical_id, "duplicate_ids": [duplicate_id]})
+
+
+async def keep_apart(codex_url: str, token: str, media_ids: list[int]) -> tuple[bool, str]:
+    """'Not a duplicate — keep these separate' in Codex (POST /media/dedupe/dismiss)."""
+    return await _post_json(codex_url, token, "/media/dedupe/dismiss", {"media_ids": media_ids})
+
+
+async def _post_json(codex_url: str, token: str, path: str, body: dict) -> tuple[bool, str]:
+    if not codex_url or not token:
+        return False, "Codex isn't set up or linked"
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(f"{codex_url.rstrip('/')}{path}", json=body, headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as e:
+        from app.core.activity import describe_error
+        return False, describe_error(e)
+    if r.status_code == 200:
+        return True, "ok"
+    from app.core.activity import describe_status
+    try:
+        detail = (r.json() or {}).get("detail")
+    except ValueError:
+        detail = None
+    return False, str(detail) if detail else describe_status(r.status_code)
+
+
 async def trigger_abs_sync(codex_url: str, token: str) -> tuple[bool, str]:
     """POST /api/sync/abs/now — Codex's per-user "sync my Audiobookshelf now",
     the same button as Codex's own Settings → Sync. Without it Codex only picks

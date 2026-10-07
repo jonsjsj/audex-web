@@ -50,6 +50,7 @@ class Overlay(unittest.TestCase):
         self.fake = Fake()
         self._o = (L.abs_client.libraries, L.abs_client.library_items, L.abs_client.me,
                    L.connections_for_library, codex_client.fetch_meta, codex_client.push_edit)
+        self._merge_fns = (codex_client.merge_works, codex_client.keep_apart)
         L.abs_client.libraries, L.abs_client.library_items, L.abs_client.me = self.fake.libraries, self.fake.library_items, self.fake.me
 
         async def pairs(identity, db, sel):
@@ -68,6 +69,7 @@ class Overlay(unittest.TestCase):
     def tearDown(self):
         (L.abs_client.libraries, L.abs_client.library_items, L.abs_client.me,
          L.connections_for_library, codex_client.fetch_meta, codex_client.push_edit) = self._o
+        codex_client.merge_works, codex_client.keep_apart = self._merge_fns
 
     def _run(self, coro_fn):
         async def go():
@@ -126,6 +128,68 @@ class Overlay(unittest.TestCase):
             ident.codex_token_encrypted = None
             self.assertEqual(await L._forward_to_codex(ident, db, "a1", {"title": "x"}), "not-linked")
         self._run(go)
+
+    def test_a_merge_made_here_is_sent_to_codex(self):
+        merged, kept = [], []
+
+        async def merge(url, token, canonical, duplicate):
+            merged.append((canonical, duplicate, token))
+            return True, "ok"
+
+        async def apart(url, token, ids):
+            kept.append((ids, token))
+            return True, "ok"
+
+        codex_client.merge_works, codex_client.keep_apart = merge, apart
+        both = {"a1": CODEX["a1"], "a3": {"fields": {"title": "Jade City (audio)"}, "edited": [], "codex_id": 77}}
+
+        async def fetch(url, ids):
+            return {i: both[i] for i in ids if i in both}
+        codex_client.fetch_meta = fetch
+
+        def resolve_to(id_):
+            return self.conn, id_
+        orig_resolve = L.resolve
+
+        async def fake_resolve(identity, db, id_):
+            return resolve_to(id_)
+        L.resolve = fake_resolve
+        try:
+            async def go(ident, db):
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", True), "ok")
+                self.assertEqual(merged, [(42, 77, "tok")])                     # the survivor is the one you were on
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", False), "ok")
+                self.assertEqual(kept, [([42, 77], "tok")])                      # "not the same book" -> keep apart
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a2", True), "not-in-codex")
+                both["a3"] = {**both["a3"], "codex_id": 42}                        # Codex already merged them
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", True), "already")
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", False), "merged-in-codex")
+                both["a3"] = {**both["a3"], "codex_id": 77}
+                ident.codex_token_encrypted = None
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", True), "not-linked")
+            self._run(go)
+        finally:
+            L.resolve = orig_resolve
+
+    def test_a_refused_merge_is_reported_not_hidden(self):
+        async def merge(url, token, canonical, duplicate):
+            return False, "HTTP 403"
+        codex_client.merge_works = merge
+
+        async def fetch(url, ids):
+            return {"a1": CODEX["a1"], "a3": {"fields": {}, "edited": [], "codex_id": 77}}
+        codex_client.fetch_meta = fetch
+        orig = L.resolve
+
+        async def fake_resolve(identity, db, id_):
+            return self.conn, id_
+        L.resolve = fake_resolve
+        try:
+            async def go(ident, db):
+                self.assertEqual(await L._tell_codex_about_merge(ident, db, "a1", "a3", True), "failed")
+            self._run(go)
+        finally:
+            L.resolve = orig
 
 
 if __name__ == "__main__":
