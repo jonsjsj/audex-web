@@ -98,6 +98,7 @@ def _book_detail_extra(item: dict) -> dict:
         "language": meta.get("language"),
         "isbn": meta.get("isbn"),
         "asin": meta.get("asin"),
+        "publishedYear": meta.get("publishedYear"),
         # Structured forms of the same fields, for the edit form.
         "authorList": [a["name"] for a in (meta.get("authors") or []) if a.get("name")],
         "narratorList": [n for n in narrators if n],
@@ -407,16 +408,23 @@ class MetadataBody(BaseModel):
     series: list[SeriesIn] | None = None
     asin: str | None = None
     isbn: str | None = None
+    description: str | None = None
+    publisher: str | None = None
+    publishedYear: str | None = None
+    language: str | None = None
+    genres: list[str] | None = None
     alsoPaired: bool = False  # apply the same change to the other edition too
 
 
 def _abs_metadata(body: MetadataBody, fields: set[str]) -> dict:
     out: dict = {}
-    for key in ("title", "subtitle", "asin", "isbn"):
+    for key in ("title", "subtitle", "asin", "isbn", "description", "publisher", "publishedYear", "language"):
         if key in fields:
             out[key] = (getattr(body, key) or "").strip() or None
     if "authors" in fields and body.authors is not None:
         out["authors"] = [{"name": n.strip()} for n in body.authors if n.strip()]
+    if "genres" in fields and body.genres is not None:
+        out["genres"] = [g.strip() for g in body.genres if g.strip()]
     if "narrators" in fields and body.narrators is not None:
         out["narrators"] = [n.strip() for n in body.narrators if n.strip()]
     if "series" in fields and body.series is not None:

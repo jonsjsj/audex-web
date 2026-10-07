@@ -2060,3 +2060,14 @@ input:focus {
 .book-edit-check input {
   width: auto;
 }
+.book-edit textarea {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  resize: vertical;
+}

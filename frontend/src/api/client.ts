@@ -95,6 +95,11 @@ export interface MetadataEdit {
   series?: { name: string; sequence?: string }[];
   asin?: string;
   isbn?: string;
+  description?: string;
+  publisher?: string;
+  publishedYear?: string;
+  language?: string;
+  genres?: string[];
   alsoPaired?: boolean;
 }
 
