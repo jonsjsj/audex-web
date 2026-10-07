@@ -289,3 +289,17 @@ async def update_metadata(base_url: str, token: str, item_id: str, metadata: dic
         raise AbsError("Your Audiobookshelf account isn't allowed to edit books.")
     if r.status_code != 200:
         raise AbsError("Audiobookshelf didn't accept that change.")
+
+
+async def scan_library(base_url: str, token: str, library_id: str) -> bool:
+    """POST /api/libraries/{id}/scan — asks Audiobookshelf to re-read the files on
+    disk (picks up added/changed books and their embedded metadata). ABS limits
+    this to admin accounts: False means "not allowed", which is normal for a
+    regular user, not an error."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"{_base(base_url)}/api/libraries/{library_id}/scan", headers=_auth(token))
+    if r.status_code in (401, 403):
+        return False
+    if r.status_code != 200:
+        raise AbsError("Audiobookshelf couldn't start a rescan.")
+    return True

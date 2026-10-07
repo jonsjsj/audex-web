@@ -6,7 +6,7 @@ import PersonDetail from "../components/PersonDetail";
 
 export default function AuthorDetail() {
   const { name } = useParams<{ name: string }>();
-  const { libraryId } = useShell();
+  const { libraryId, syncSignal } = useShell();
   const [group, setGroup] = useState<BookGroup | null | undefined>(undefined); // undefined = loading
   const [bio, setBio] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export default function AuthorDetail() {
       .authors(libraryId)
       .then((groups) => setGroup(groups.find((g) => g.name === decodeURIComponent(name)) ?? null))
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this author."));
-  }, [libraryId, name]);
+  }, [libraryId, name, syncSignal]);
 
   // A separate call, not embedded in the /authors list — a bio is a whole
   // paragraph, not worth fetching for every author until one is actually opened.

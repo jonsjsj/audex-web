@@ -13,7 +13,7 @@ const SORTS: GroupSort[] = [
 
 export default function Authors() {
   const navigate = useNavigate();
-  const { libraryId, error: shellError, search } = useShell();
+  const { libraryId, error: shellError, search, syncSignal } = useShell();
   const [groups, setGroups] = useState<BookGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export default function Authors() {
       .authors(libraryId)
       .then(setGroups)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load authors."));
-  }, [libraryId]);
+  }, [libraryId, syncSignal]);
 
   if (error || shellError) return <div className="error" style={{ margin: "1.5rem" }}>{error || shellError}</div>;
   if (!groups) return <p className="sub" style={{ padding: "1.5rem" }}>Loading authors…</p>;

@@ -31,6 +31,11 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
   const [sequence, setSequence] = useState(book.seriesList[0]?.sequence ?? "");
   const [asin, setAsin] = useState(book.asin ?? "");
   const [isbn, setIsbn] = useState(book.isbn ?? "");
+  const [description, setDescription] = useState(book.description ?? "");
+  const [publisher, setPublisher] = useState(book.publisher ?? "");
+  const [year, setYear] = useState(book.publishedYear ?? "");
+  const [language, setLanguage] = useState(book.language ?? "");
+  const [genres, setGenres] = useState(book.genres.join(", "));
   const [alsoPaired, setAlsoPaired] = useState(!!book.pairedItemId);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -48,6 +53,11 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
         series: series.trim() ? [{ name: series, sequence }] : [],
         asin,
         isbn,
+        description,
+        publisher,
+        publishedYear: year,
+        language,
+        genres: splitList(genres),
         alsoPaired,
       });
       onSaved();
@@ -89,6 +99,24 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
           <input id="ed-isbn" value={isbn} onChange={(e) => setIsbn(e.target.value)} />
         </div>
       </div>
+      <div className="book-edit-row">
+        <div style={{ flex: 2 }}>
+          <label htmlFor="ed-pub">Publisher</label>
+          <input id="ed-pub" value={publisher} onChange={(e) => setPublisher(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-year">Year</label>
+          <input id="ed-year" value={year} onChange={(e) => setYear(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-lang">Language</label>
+          <input id="ed-lang" value={language} onChange={(e) => setLanguage(e.target.value)} />
+        </div>
+      </div>
+      <label htmlFor="ed-genres">Genres (comma separated)</label>
+      <input id="ed-genres" value={genres} onChange={(e) => setGenres(e.target.value)} />
+      <label htmlFor="ed-desc">Description</label>
+      <textarea id="ed-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
       <p className="sub">Giving the ebook and the audiobook the same ASIN or ISBN is the surest way to keep them one book.</p>
       {book.pairedItemId && (
         <label className="book-edit-check">
@@ -178,7 +206,7 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
 export default function BookDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
-  const { libraryId } = useShell();
+  const { libraryId, syncSignal } = useShell();
   const [book, setBook] = useState<BookDetailModel | null>(null);
   const [nextInSeries, setNextInSeries] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +220,7 @@ export default function BookDetail() {
       .item(itemId)
       .then(setBook)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this book."));
-  }, [itemId, reload]);
+  }, [itemId, reload, syncSignal]);
 
   // "Next: #N Title" — mirrors the mobile app's WorkDetailScreen. Reuses the
   // same grouped-series endpoint Series/SeriesDetail already fetch, rather

@@ -55,3 +55,21 @@ async def verify_token(codex_url: str, token: str) -> bool:
     except httpx.HTTPError:
         return False
     return r.status_code == 200
+
+
+async def trigger_abs_sync(codex_url: str, token: str) -> tuple[bool, str]:
+    """POST /api/sync/abs/now — Codex's per-user "sync my Audiobookshelf now",
+    the same button as Codex's own Settings → Sync. Without it Codex only picks
+    up Webdex's reading progress on its own ~5 minute schedule. Returns
+    (ok, short human detail)."""
+    url = f"{codex_url.rstrip('/')}/api/sync/abs/now"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(url, headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        return False, "Couldn't reach Codex."
+    if r.status_code in (401, 403):
+        return False, "Codex didn't accept your token — relink it in Settings."
+    if r.status_code != 200:
+        return False, f"Codex answered {r.status_code}."
+    return True, "Codex is syncing."
