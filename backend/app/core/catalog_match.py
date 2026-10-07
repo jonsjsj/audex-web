@@ -199,6 +199,9 @@ def author_tokens(meta: dict) -> set[str]:
     names = [a.get("name") for a in (meta.get("authors") or []) if a.get("name")]
     if not names and meta.get("authorName"):
         names = [meta["authorName"]]
+    # What Audiobookshelf itself lists, when Codex's checked metadata replaced it (see codex_overlay): the two
+    # editions are compared on either spelling, so a correction made to only one of them can't split the pair.
+    names += [n for n in (meta.get("_authorsAbs") or []) if n]
     toks: set[str] = set()
     for n in names:
         toks.update(t for t in norm_author(n.replace(",", " ")).split(" ") if len(t) > 1)
@@ -264,11 +267,14 @@ def _title_score(ta: list[str], tb: list[str]) -> float:
     return jaro_winkler(" ".join(ta), " ".join(tb))
 
 
-def pair_dual_format(entries: list[dict]) -> None:
+def pair_dual_format(entries: list[dict], joins=frozenset(), splits=frozenset()) -> None:
     """Mutates each entry's `book` dict in place, setting
     `book["pairedItemId"]` when a different entry is the same work in the
     complementary format. Each entry: {"book": <_book_summary() dict>,
     "meta": <raw ABS item.media.metadata dict>}.
+
+    `joins` / `splits` are the person's own decisions — sets of frozenset({id_a, id_b}). A join is applied FIRST
+    and is never moved by the automatic matching; a split is never paired automatically.
 
     Identity cascade: matching ASIN or ISBN-13 wins outright. Otherwise the
     title (part by part, see _title_score) must match AND the credited authors
@@ -298,10 +304,26 @@ def pair_dual_format(entries: list[dict]) -> None:
             audios.append(entry)
 
     used_audio: set[int] = set()
-    for e in ebooks:
+    used_ebook: set[int] = set()
+    # 1) The person's own joins — absolute.
+    for i, e in enumerate(ebooks):
+        for j, a in enumerate(audios):
+            if j in used_audio or frozenset((e["book"]["id"], a["book"]["id"])) not in joins:
+                continue
+            used_ebook.add(i)
+            used_audio.add(j)
+            e["book"]["pairedItemId"] = a["book"]["id"]
+            a["book"]["pairedItemId"] = e["book"]["id"]
+            break
+    # 2) Everything else by identity.
+    for i, e in enumerate(ebooks):
+        if i in used_ebook:
+            continue
         best_j, best_score = None, 0.0
         for j, a in enumerate(audios):
             if j in used_audio:
+                continue
+            if frozenset((e["book"]["id"], a["book"]["id"])) in splits:
                 continue
             if e["omnibus"] or a["omnibus"] or e["dramatized"] != a["dramatized"]:
                 continue

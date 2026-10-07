@@ -1,7 +1,23 @@
 """audex-web configuration — env-driven, matching the alignment-service/Codex pattern:
 no config UI in v0, edit the .env and restart. Everything the app needs to talk to
 Audiobookshelf, Codex, and an OIDC identity provider lives here."""
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _shipped_version() -> str | None:
+    """The version this build was stamped with: /app/VERSION in the image, the repo's VERSION in a checkout.
+    Preferred over the APP_VERSION environment variable, which a re-created container can carry stale."""
+    here = Path(__file__).resolve()
+    for candidate in (here.parents[2] / "VERSION", here.parents[3] / "VERSION"):
+        try:
+            text = candidate.read_text().strip()
+        except (OSError, IndexError):
+            continue
+        if text:
+            return text
+    return None
 
 
 class Settings(BaseSettings):
@@ -61,6 +77,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+_shipped = _shipped_version()
+if _shipped:
+    settings.APP_VERSION = _shipped
 
 
 def oidc_active() -> bool:

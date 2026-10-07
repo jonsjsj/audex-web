@@ -7,6 +7,25 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.3] - 2026-10-07
+
+### Fixed
+- **"Still says v0.5.2 even though things updated" — the update looked like it failed forever.** The app image
+  stamps its version into an `APP_VERSION` environment variable, and the one-click updater copied the running
+  container's *whole* environment into the new one — so the new code ran labelled with the OLD version, kept
+  offering the same update, and never settled. The updater now carries over only the settings *you* made (not
+  what the old image baked in, never `APP_VERSION`), and the app also reads its version from a file shipped in
+  the image, so a stale variable can't misreport it. After this update the version is right and "Update" stops
+  re-appearing.
+- **Audiobook and ebook splitting apart again.** Merging only changed Audiobookshelf's metadata, and Codex's
+  periodic correction of Audiobookshelf could change it back. Merges (and "Not the same book") are now remembered
+  by Webdex itself and applied first, so they hold whatever the metadata does. Automatic matching also now
+  compares the authors Audiobookshelf lists as well as Codex's corrected ones, so a correction on only one
+  edition can't separate them.
+
+### Added
+- **Not the same book** (book page, on a merged book): shows the two editions separately from now on.
+
 ## [0.7.2] - 2026-10-07
 
 ### Added
