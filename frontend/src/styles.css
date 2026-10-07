@@ -2042,3 +2042,21 @@ input:focus {
   font-family: var(--mono);
   font-size: 0.85rem;
 }
+
+/* Edit details form (book page) */
+.book-edit {
+  max-width: 34rem;
+}
+.book-edit-row {
+  display: flex;
+  gap: 0.8rem;
+}
+.book-edit-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 500;
+}
+.book-edit-check input {
+  width: auto;
+}

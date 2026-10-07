@@ -275,3 +275,17 @@ async def delete_progress(base_url: str, token: str, item_id: str) -> None:
         r = await client.delete(f"{_base(base_url)}/api/me/progress/{record_id}", headers=_auth(token))
     if r.status_code not in (200, 204):
         raise AbsError("Couldn't clear this book's progress.")
+
+
+async def update_metadata(base_url: str, token: str, item_id: str, metadata: dict) -> None:
+    """PATCH /api/items/{id}/media {metadata: {...}} — the same call ABS's own
+    "Edit" dialog makes. Only the keys given are changed. Needs an ABS account
+    that's allowed to update library items; ABS answers 403 otherwise."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.patch(
+            f"{_base(base_url)}/api/items/{item_id}/media", headers=_auth(token), json={"metadata": metadata}
+        )
+    if r.status_code == 403:
+        raise AbsError("Your Audiobookshelf account isn't allowed to edit books.")
+    if r.status_code != 200:
+        raise AbsError("Audiobookshelf didn't accept that change.")

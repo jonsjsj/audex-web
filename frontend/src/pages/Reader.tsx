@@ -177,7 +177,6 @@ export default function Reader() {
   // the Player's "Jump to text") — the auto-resume effect must not then ALSO
   // override the position from listening progress, fighting that jump.
   const explicitProgressionRef = useRef(false);
-  const autoResumedRef = useRef(false);
 
   // Cross-format jump (docs/SYNC_API.md §3) — gated on this item also having
   // audio, same reasoning as Player.tsx's own gate on hasEbook.
@@ -307,6 +306,7 @@ export default function Reader() {
         const atProgressionParam = searchParams.get("atProgression");
         const atProgression = atProgressionParam !== null ? Number(atProgressionParam) : null;
         let initialLocator: Locator | undefined;
+        let resumeNote: string | null = null;
         if (atProgression !== null && Number.isFinite(atProgression) && positions.length > 0) {
           explicitProgressionRef.current = true;
           initialLocator = locatorAtTotal(atProgression);
@@ -322,7 +322,10 @@ export default function Reader() {
           );
         } else {
           const saved = positionRes.locator ? Locator.deserialize(positionRes.locator) : undefined;
-          const savedFraction = positionRes.progress ?? 0;
+          // One work, one progress: `detail` already folds in the other
+          // edition's saved progress (see library.py _share_twin_progress), so
+          // a book you read in another app — or listened to — opens where you are.
+          const savedFraction = Math.max(positionRes.progress ?? 0, detail?.ebookProgress ?? 0);
           if (saved && Math.abs(totalOf(saved) - savedFraction) <= POSITION_DISAGREE) {
             initialLocator = saved; // our own, precise position — still in step with the saved %
           } else if (savedFraction > 0.005) {
@@ -332,6 +335,19 @@ export default function Reader() {
             initialLocator = locatorAtTotal(savedFraction);
           } else {
             initialLocator = saved;
+          }
+          // Listened further than you've read? Carry the audio position over —
+          // exactly through the read-along map when there is one, otherwise by
+          // fraction (the audio's % through the book is a close stand-in).
+          if (detail && detail.audioProgress > savedFraction + 0.01 && detail.audioProgress < 0.999) {
+            const audioId = detail.numAudioFiles > 0 ? itemId! : detail.pairedItemId;
+            const map = audioId ? await api.readAlongMap(audioId).catch(() => null) : null;
+            const exact = map ? progressionAt(map, detail.audioTimeS) : null;
+            const target = locatorAtTotal(exact ?? detail.audioProgress);
+            if (target) {
+              initialLocator = target;
+              resumeNote = exact !== null ? "Resumed from your listening progress" : "Resumed near your listening progress";
+            }
           }
         }
 
@@ -394,6 +410,7 @@ export default function Reader() {
         navRef.current = nav;
         setFontSizeIdx(initialFontIdx);
         setLoading(false);
+        if (resumeNote) flash(resumeNote, 4500);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't open this book.");
       }
@@ -417,24 +434,6 @@ export default function Reader() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId]);
-
-  // ── Auto-resume from listening, if you've listened further than you've read ──
-  // The reader-side half of the same carryover as Player.tsx's own effect —
-  // see the comment there for the "furthest wins" reasoning. Runs once
-  // bookDetail + map + the navigator are all ready.
-  useEffect(() => {
-    if (autoResumedRef.current || explicitProgressionRef.current) return;
-    if (!bookDetail || !readAlong.map || !navRef.current || positionsRef.current.length === 0) return;
-    autoResumedRef.current = true; // decide now, whichever way — never re-run
-    if (bookDetail.numAudioFiles === 0 || bookDetail.audioProgress <= bookDetail.ebookProgress) return;
-    const targetP = progressionAt(readAlong.map, bookDetail.audioTimeS);
-    if (targetP === null || targetP - progressionRef.current <= 0.01) return; // not meaningfully ahead
-    const target = locatorAtTotal(targetP);
-    if (!target) return;
-    navRef.current.go(target, true, () => {});
-    flash("Resumed from your listening progress", 4000);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readAlong.map, bookDetail]);
 
   // ── Follow the audio ────────────────────────────────────────────────────
   // With a read-along map and THIS book's audiobook playing, turn the page to

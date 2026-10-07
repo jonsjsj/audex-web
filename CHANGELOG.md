@@ -10,6 +10,20 @@ here whenever there's something worth shipping.
 ## [0.6.0] - 2026-10-06
 
 ### Fixed
+- **An ebook and its audiobook showed up as two separate cards.** Matching
+  compared only the *first-listed* author and a fuzzy whole-title score, so
+  "Deverell, Travis, Shirtaloon" vs "Shirtaloon, Travis Deverell" or a title with
+  an extra subtitle never matched — while near-misses like *Dune* / *Dune
+  Messiah* or *Monsters 12* / *13* could. Matching now compares every author's
+  name words, the title part by part (so a longer or shorter subtitle is fine),
+  the volume number, and the series position; a Kindle-vs-Audible ASIN mismatch
+  no longer blocks a pair. A matched pair is shown as **one book** everywhere
+  (library, series, authors, narrators), with both Listen and Read.
+- **Progress now carries across the two editions.** The book page, Player and
+  Reader see the other edition's saved position, so a book you've listened to
+  60% of opens in the Reader at ~60% (exactly, via the read-along map when one
+  exists, otherwise by percentage) instead of page one, and vice versa.
+- Browser tab title is now "Webdex".
 - **A+ / A- never changed the text size.** Readium's font-size setting is a
   multiplier (1 = 100%, valid range 0.7–4), but the Reader handed it the
   percentage (`100`, `112.5`, `175`…); Readium silently drops an out-of-range
@@ -36,6 +50,10 @@ here whenever there's something worth shipping.
   the saved percentage was, say, 50%. It now resumes at that percentage.
 
 ### Added
+- **Edit details (on the book page).** Fix a book's title, subtitle, authors,
+  narrators, series, ASIN or ISBN and it's saved **to Audiobookshelf itself**, so
+  Audex and Codex see the correction too. A tick-box applies it to the other
+  edition as well; giving both editions the same ASIN/ISBN keeps them one book.
 - **Hide the side menu.** A button next to the Audex logo collapses the side
   menu on every page (and a small ☰ brings it back); it remembers your choice.
 - **One page / two pages.** A switch in the Reader header chooses single-page

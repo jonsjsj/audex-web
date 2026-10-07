@@ -79,7 +79,7 @@ async def bulk_status(
     # same reasoning as above (serverKey == "" tags a primary item).
     ebook_to_audio: dict[str, str] = {}
     try:
-        for _conn, _item, book in await _iter_books_paired(identity, db, library_id):
+        for _conn, _item, book in await _iter_books_paired(identity, db, library_id, merge=False):
             if book["serverKey"] or not book["pairedItemId"]:
                 continue
             if book["hasEbook"] and book["numAudioFiles"] == 0:

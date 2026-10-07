@@ -81,6 +81,21 @@ export interface BookDetail extends Book {
   language: string | null;
   isbn: string | null;
   asin: string | null;
+  authorList: string[];
+  narratorList: string[];
+  seriesList: { name: string; sequence: string }[];
+}
+
+/** Fields of a book's details editable in Audiobookshelf; only those present are changed. */
+export interface MetadataEdit {
+  title?: string;
+  subtitle?: string;
+  authors?: string[];
+  narrators?: string[];
+  series?: { name: string; sequence?: string }[];
+  asin?: string;
+  isbn?: string;
+  alsoPaired?: boolean;
 }
 
 export interface UpdateCheck {
@@ -223,6 +238,11 @@ export const api = {
       `/api/library/items?libraryId=${encodeURIComponent(libraryId)}&search=${encodeURIComponent(search)}`,
     ),
   item: (itemId: string) => request<BookDetail>(`/api/library/items/${itemId}`),
+  updateMetadata: (itemId: string, body: MetadataEdit) =>
+    request<{ ok: true; updated: number }>(`/api/library/items/${itemId}/metadata`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>

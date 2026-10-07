@@ -170,7 +170,7 @@ export default function Player() {
   const currentChapter = session!.chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
   const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
-  const readingAheadS = book!.hasEbook && readAlong.map ? timeAtProgression(readAlong.map, book!.ebookProgress) : null;
+  const readingAheadS = (book!.hasEbook || book!.pairedItemId) && readAlong.map ? timeAtProgression(readAlong.map, book!.ebookProgress) : null;
   const showJumpToReading = readingAheadS !== null && readingAheadS - shown > 20;
 
   return (

@@ -162,14 +162,119 @@ def jaro_winkler(s1: str, s2: str) -> float:
     return jaro + prefix * 0.1 * (1 - jaro)
 
 
-ACCEPT_THRESHOLD = 0.90  # matches GraphBuilder's acceptThreshold
+ACCEPT_THRESHOLD = 0.95  # title-only similarity; authors/numbers/series are checked separately
+
+_SERIES_SEQ_RE = re.compile(r"^(.*?)\s*#\s*([\d.]+)\s*$")
+_SEGMENT_SPLIT_RE = re.compile(r"\s*(?::|\u2014|\s-\s)\s*")
+_BOOK_N_TAIL_RE = re.compile(r"[,]?\s*\b(book|vol|vol\.|volume)\s+\d+(\.\d+)?$")
+_NUM_TOKEN_RE = re.compile(r"(?<![a-z])\d+(?:\.\d+)?(?![a-z])")
+
+
+def title_segments(title: str) -> list[str]:
+    """The title cut into its ':'-separated parts, each normalized, with the
+    parts publishers vary freely ("A Novel", "Book One of X", "…, Book 13")
+    dropped. ABS items for the same work are often titled differently per
+    edition — "Name 13: A LitRPG Adventure" vs "Name 13: A LitRPG Adventure:
+    Name, Book 13" — so identity is judged part by part (see _same_work)."""
+    raw = _PARENTHETICAL_RE.sub(" ", title)
+    out: list[str] = []
+    for part in _SEGMENT_SPLIT_RE.split(raw):
+        p = _basic(part)
+        p = _BOOK_N_TAIL_RE.sub("", p).strip(" ,")
+        if not p or _SUBTITLE_DROPPABLE_RE.match(p):
+            continue
+        if not out:
+            p = _LEADING_ARTICLE_RE.sub("", p)
+        p = _WHITESPACE_RE.sub(" ", _NON_ALNUM_RE.sub(" ", p).replace("#", " ")).strip()
+        if p:
+            out.append(p)
+    return out
+
+
+def author_tokens(meta: dict) -> set[str]:
+    """Every word of every credited author. "Deverell, Travis" + "Shirtaloon"
+    and "Shirtaloon" + "Travis Deverell" are the same people listed in a
+    different order / name format — a word bag compares them correctly where
+    comparing just the first-listed author string does not."""
+    names = [a.get("name") for a in (meta.get("authors") or []) if a.get("name")]
+    if not names and meta.get("authorName"):
+        names = [meta["authorName"]]
+    toks: set[str] = set()
+    for n in names:
+        toks.update(t for t in norm_author(n.replace(",", " ")).split(" ") if len(t) > 1)
+    return toks
+
+
+def series_keys(meta: dict) -> list[tuple[str, float | None]]:
+    out: list[tuple[str, float | None]] = []
+    for s in meta.get("series") or []:
+        name = norm_title(s.get("name") or "")
+        if name:
+            out.append((name, _to_float(s.get("sequence"))))
+    if not out and meta.get("seriesName"):
+        m = _SERIES_SEQ_RE.match(str(meta["seriesName"]).strip())
+        raw, seq = (m.group(1), _to_float(m.group(2))) if m else (str(meta["seriesName"]), None)
+        name = norm_title(raw)
+        if name:
+            out.append((name, seq))
+    return out
+
+
+def _to_float(v) -> float | None:
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _series_relation(a: list[tuple[str, float | None]], b: list[tuple[str, float | None]]) -> str:
+    """"same" (same series, same position), "conflict" (same series, different
+    position — certainly a different book), or "unknown"."""
+    rel = "unknown"
+    for na, sa in a:
+        for nb, sb in b:
+            if na != nb:
+                continue
+            if sa is None or sb is None:
+                continue
+            if sa == sb:
+                return "same"
+            rel = "conflict"
+    return rel
+
+
+def _numbers(seg: str) -> set[str]:
+    return set(_NUM_TOKEN_RE.findall(seg))
+
+
+def _title_score(ta: list[str], tb: list[str]) -> float:
+    """1.0 when one title's parts are a leading run of the other's (the same
+    work with a longer/shorter subtitle); otherwise Jaro-Winkler of the whole
+    normalized title. Two different volume numbers in the lead part always
+    score 0 — "Monsters 12" vs "Monsters 13" is a one-character difference to
+    a fuzzy matcher but a different book."""
+    if not ta or not tb:
+        return 0.0
+    na, nb = _numbers(ta[0]), _numbers(tb[0])
+    if na and nb and na != nb:
+        return 0.0
+    n = min(len(ta), len(tb))
+    if ta[:n] == tb[:n]:
+        return 1.0
+    return jaro_winkler(" ".join(ta), " ".join(tb))
 
 
 def pair_dual_format(entries: list[dict]) -> None:
     """Mutates each entry's `book` dict in place, setting
     `book["pairedItemId"]` when a different entry is the same work in the
     complementary format. Each entry: {"book": <_book_summary() dict>,
-    "meta": <raw ABS item.media.metadata dict>}."""
+    "meta": <raw ABS item.media.metadata dict>}.
+
+    Identity cascade: matching ASIN or ISBN-13 wins outright. Otherwise the
+    title (part by part, see _title_score) must match AND the credited authors
+    must share their names — unless both items sit at the same position of
+    the same series, which stands in for the author check (pen names and
+    co-author lists differ between an ebook and its audiobook)."""
     ebooks: list[dict] = []
     audios: list[dict] = []
     for e in entries:
@@ -177,14 +282,13 @@ def pair_dual_format(entries: list[dict]) -> None:
         if book["numAudioFiles"] > 0 and book["hasEbook"]:
             continue  # already has both natively, nothing to pair
         meta = e["meta"]
-        authors = meta.get("authors") or []
-        primary_author = next((a.get("name") for a in authors if a.get("name")), None) or meta.get("authorName") or ""
         entry = {
             "book": book,
             "asin": (meta.get("asin") or "").strip().upper() or None,
             "isbn13": normalize_isbn(meta.get("isbn")),
-            "title_norm": norm_title(book["title"]),
-            "author_norm": norm_author(primary_author),
+            "segments": title_segments(book["title"]),
+            "authors": author_tokens(meta),
+            "series": series_keys(meta),
             "omnibus": is_omnibus(book["title"], book.get("subtitle")),
             "dramatized": is_dramatized(book["title"], book.get("subtitle")),
         }
@@ -201,23 +305,24 @@ def pair_dual_format(entries: list[dict]) -> None:
                 continue
             if e["omnibus"] or a["omnibus"] or e["dramatized"] != a["dramatized"]:
                 continue
-            if e["asin"] and a["asin"]:
-                if e["asin"] != a["asin"]:
-                    continue
-                score = 1.0
-            elif e["isbn13"] and a["isbn13"]:
-                if e["isbn13"] != a["isbn13"]:
-                    continue
-                score = 1.0
+            if (e["asin"] and e["asin"] == a["asin"]) or (e["isbn13"] and e["isbn13"] == a["isbn13"]):
+                score = 10.0
             else:
-                if not e["author_norm"] or not a["author_norm"]:
+                # A Kindle ASIN and an Audible ASIN are different by nature,
+                # so differing ids prove nothing — fall through to the title.
+                rel = _series_relation(e["series"], a["series"])
+                if rel == "conflict":
                     continue
-                author_sim = 1.0 if e["author_norm"] == a["author_norm"] else jaro_winkler(e["author_norm"], a["author_norm"])
-                if author_sim < ACCEPT_THRESHOLD:
+                title = _title_score(e["segments"], a["segments"])
+                if title < ACCEPT_THRESHOLD:
                     continue
-                title_sim = jaro_winkler(e["title_norm"], a["title_norm"])
-                score = 0.7 * title_sim + 0.3 * author_sim
-            if score >= ACCEPT_THRESHOLD and score > best_score:
+                overlap = 0.0
+                if e["authors"] and a["authors"]:
+                    overlap = len(e["authors"] & a["authors"]) / min(len(e["authors"]), len(a["authors"]))
+                if overlap <= 0.5 and rel != "same":
+                    continue
+                score = title + overlap + (0.5 if rel == "same" else 0.0)
+            if score > best_score:
                 best_score, best_j = score, j
         if best_j is not None:
             used_audio.add(best_j)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
 import { useShell } from "../components/Shell";
@@ -15,6 +15,100 @@ function formatDuration(s: number | null): string | null {
  *  actual navigation (not just labels) — see docs/AUDEX_NAVIGATION.md's
  *  "clickable author/series/title" principle. Reached from a library-grid
  *  card; Play/Read are the actions FROM here, not skipped past it. */
+/** Comma/newline separated text <-> list, for the multi-value fields. */
+const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(Boolean);
+
+/** Fix a book's details where they live: Audiobookshelf. Wrong or mismatched
+ *  title/author/series/ASIN/ISBN is what stops an ebook and its audiobook from
+ *  showing up as one book, and the fix belongs in the library (so the Audex and
+ *  Codex apps benefit too), not in a local workaround. */
+function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSaved: () => void; onCancel: () => void }) {
+  const [title, setTitle] = useState(book.title);
+  const [subtitle, setSubtitle] = useState(book.subtitle ?? "");
+  const [authors, setAuthors] = useState(book.authorList.join(", "));
+  const [narrators, setNarrators] = useState(book.narratorList.join(", "));
+  const [series, setSeries] = useState(book.seriesList[0]?.name ?? "");
+  const [sequence, setSequence] = useState(book.seriesList[0]?.sequence ?? "");
+  const [asin, setAsin] = useState(book.asin ?? "");
+  const [isbn, setIsbn] = useState(book.isbn ?? "");
+  const [alsoPaired, setAlsoPaired] = useState(!!book.pairedItemId);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.updateMetadata(book.id, {
+        title,
+        subtitle,
+        authors: splitList(authors),
+        narrators: splitList(narrators),
+        series: series.trim() ? [{ name: series, sequence }] : [],
+        asin,
+        isbn,
+        alsoPaired,
+      });
+      onSaved();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Couldn't save.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="book-detail-section book-edit" onSubmit={save}>
+      <div className="l">EDIT DETAILS</div>
+      <p className="sub">Saved to Audiobookshelf, so Audex and Codex pick it up too.</p>
+      <label htmlFor="ed-title">Title</label>
+      <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+      <label htmlFor="ed-sub">Subtitle</label>
+      <input id="ed-sub" value={subtitle} onChange={(e) => setSubtitle(e.target.value)} />
+      <label htmlFor="ed-auth">Authors (comma separated)</label>
+      <input id="ed-auth" value={authors} onChange={(e) => setAuthors(e.target.value)} />
+      <label htmlFor="ed-narr">Narrators (comma separated)</label>
+      <input id="ed-narr" value={narrators} onChange={(e) => setNarrators(e.target.value)} />
+      <div className="book-edit-row">
+        <div style={{ flex: 3 }}>
+          <label htmlFor="ed-series">Series</label>
+          <input id="ed-series" value={series} onChange={(e) => setSeries(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-seq">Book #</label>
+          <input id="ed-seq" value={sequence} onChange={(e) => setSequence(e.target.value)} />
+        </div>
+      </div>
+      <div className="book-edit-row">
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-asin">ASIN</label>
+          <input id="ed-asin" value={asin} onChange={(e) => setAsin(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-isbn">ISBN</label>
+          <input id="ed-isbn" value={isbn} onChange={(e) => setIsbn(e.target.value)} />
+        </div>
+      </div>
+      <p className="sub">Giving the ebook and the audiobook the same ASIN or ISBN is the surest way to keep them one book.</p>
+      {book.pairedItemId && (
+        <label className="book-edit-check">
+          <input type="checkbox" checked={alsoPaired} onChange={(e) => setAlsoPaired(e.target.checked)} />
+          Apply to the other edition too
+        </label>
+      )}
+      {err && <div className="error">{err}</div>}
+      <div className="book-detail-actions">
+        <button className="btn btn-primary" style={{ width: "auto" }} disabled={busy} type="submit">
+          {busy ? "Saving…" : "Save to Audiobookshelf"}
+        </button>
+        <button className="btn btn-secondary" style={{ width: "auto" }} type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default function BookDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
@@ -22,6 +116,8 @@ export default function BookDetail() {
   const [book, setBook] = useState<BookDetailModel | null>(null);
   const [nextInSeries, setNextInSeries] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!itemId) return;
@@ -29,7 +125,7 @@ export default function BookDetail() {
       .item(itemId)
       .then(setBook)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this book."));
-  }, [itemId]);
+  }, [itemId, reload]);
 
   // "Next: #N Title" — mirrors the mobile app's WorkDetailScreen. Reuses the
   // same grouped-series endpoint Series/SeriesDetail already fetch, rather
@@ -136,9 +232,23 @@ export default function BookDetail() {
                 {book.ebookProgress > 0.001 ? "Resume reading" : "Read"}
               </button>
             )}
+            <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setEditing((v) => !v)}>
+              Edit details
+            </button>
           </div>
         </div>
       </div>
+
+      {editing && (
+        <EditDetails
+          book={book}
+          onCancel={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setReload((n) => n + 1);
+          }}
+        />
+      )}
 
       {book.description && (
         <div className="book-detail-section">
