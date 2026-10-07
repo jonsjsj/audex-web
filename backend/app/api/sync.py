@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import list_connections
 from app.api.deps import get_codex_token, get_current_identity
+from app.api.library import _codex_meta_on
 from app.core import abs_client, codex_client
 from app.core.abs_client import AbsError
 from app.core.config import settings
@@ -47,4 +48,10 @@ async def sync_now(
     else:
         ok, detail = await codex_client.trigger_abs_sync(settings.CODEX_URL, codex_token)
         codex = {"state": "started" if ok else "failed", "detail": detail}
+    # Codex's checked metadata is cached for a few minutes; a manual sync must show it fresh, so drop the cache
+    # (the pages re-fetch right after this returns). Same rule as an edit made here.
+    if settings.CODEX_URL and await _codex_meta_on(identity, db):
+        codex_client.forget_all_meta()
+        if codex["state"] == "started":
+            codex["detail"] = "Codex is syncing; its checked details are re-read."
     return {"audiobookshelf": servers, "codex": codex}

@@ -38,6 +38,7 @@ export default function Settings() {
   const [codexToken, setCodexToken] = useState("");
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
+  const [useCodexMeta, setUseCodexMeta] = useState(true);
   const [codexInfoOpen, setCodexInfoOpen] = useState(false);
   const [updateCapable, setUpdateCapable] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -188,6 +189,19 @@ export default function Settings() {
       refreshLibraries();
     } finally {
       setServerBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    api.settings().then((p) => setUseCodexMeta(p.useCodexMeta !== false)).catch(() => {});
+  }, []);
+
+  async function toggleCodexMeta(on: boolean) {
+    setUseCodexMeta(on);
+    try {
+      await api.updateSettings({ useCodexMeta: on });
+    } catch {
+      setUseCodexMeta(!on);
     }
   }
 
@@ -381,6 +395,23 @@ export default function Settings() {
           </div>
         )}
         {codexError && <div className="error" style={{ marginTop: "0.6rem" }}>{codexError}</div>}
+        {me.codexConfigured && (
+          <div className="settings-row" style={{ marginTop: "0.6rem" }}>
+            <div>
+              <div className="settings-row-label">Use Codex's metadata</div>
+              <div className="settings-row-sub">
+                Show the author, series, year and description you've fixed in Codex instead of Audiobookshelf's raw
+                values (needs a Codex that serves it; falls back to Audiobookshelf on any problem).
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              aria-label="Use Codex's metadata"
+              checked={useCodexMeta}
+              onChange={(e) => toggleCodexMeta(e.target.checked)}
+            />
+          </div>
+        )}
       </section>
 
       <section className="settings-section">

@@ -29,12 +29,20 @@ async def _get_or_create(db: AsyncSession, identity_id: int) -> UserSettings:
 async def get_settings(identity: Identity = Depends(get_current_identity), db: AsyncSession = Depends(get_db)):
     row = await _get_or_create(db, identity.id)
     await db.commit()
-    return {"playbackSpeed": row.playback_speed, "readerFontSize": row.reader_font_size}
+    return _out(row)
+
+
+def _out(row: UserSettings) -> dict:
+    return {
+        "playbackSpeed": row.playback_speed, "readerFontSize": row.reader_font_size,
+        "useCodexMeta": row.use_codex_meta is not False,
+    }
 
 
 class UpdateSettingsBody(BaseModel):
     playbackSpeed: float | None = None
     readerFontSize: float | None = None
+    useCodexMeta: bool | None = None
 
 
 @router.put("")
@@ -48,5 +56,7 @@ async def update_settings(
         row.playback_speed = max(0.5, min(3.0, body.playbackSpeed))
     if body.readerFontSize is not None:
         row.reader_font_size = max(50.0, min(300.0, body.readerFontSize))
+    if body.useCodexMeta is not None:
+        row.use_codex_meta = body.useCodexMeta
     await db.commit()
-    return {"playbackSpeed": row.playback_speed, "readerFontSize": row.reader_font_size}
+    return _out(row)

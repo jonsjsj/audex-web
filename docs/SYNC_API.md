@@ -118,6 +118,36 @@ Content-Type: application/json
 valid. Useful to validate a pasted key before saving it, rather than
 discovering it's wrong on the first silent-failed push.
 
+### Codex's checked metadata — `/audex/meta` (added 2026-10)
+
+Audiobookshelf's own metadata is often wrong; the owner fixes it in Codex. Codex (a) **writes those fixes back
+into ABS** (author, series + position, year, description, cover; it needs an ABS account that is an admin or has
+"Can Update"), and (b) serves its checked metadata to Audex / audex-web **by ABS item id** so a client shows the
+fix immediately, without waiting for the write-back. Public + read-only like `/audex/align` (no Codex login);
+nothing is listed, an item is only reachable by its unguessable ABS id.
+
+| Call | Purpose |
+|---|---|
+| `GET /audex/config` | Discovery. `meta_via_codex: true` + `meta_item_api: "/audex/meta"` when available. |
+| `GET /audex/meta/{absItemId}` | `{found, fields, edited, codex_id}` for one book. |
+| `POST /audex/meta` `{ids:[…]}` | `{items: {absItemId: {fields, edited, codex_id}}}` — up to **200** ids per call; unknown ids are absent. Use this for lists. |
+
+`fields` holds ONLY the keys Codex has a value for: `title, author, narrator, series_name, series_position (float),
+year (int), description, cover_url`. A missing key means "no opinion" — keep ABS's value (never blank it).
+`edited` lists the fields a person fixed **by hand** (highest trust). `author` / `narrator` are comma-separated
+display strings.
+
+**Client rule:** per field, Codex's value if present, else ABS's. Do it before grouping, sorting and searching, so
+series/author/narrator groups use the corrected values. Use Codex's `cover_url` **only when `cover_url` is in
+`edited`** (ABS's own cover is otherwise the better one; a hand-picked cover is also written into ABS by Codex).
+Cache per item (a few minutes), fetch in batches of ≤200, time out at ~5 s, and on any failure silently fall back
+to ABS.
+
+**Edits made in a client:** if the person has linked their Codex API key, send the fix to
+`PATCH {codex}/media/{codex_id}` (Bearer API key) with Codex's field names (`title, author, narrator,
+series_name, series_position, year`) **as well as** to ABS. Codex then records it as a hand edit (so its own
+periodic ABS correction doesn't revert it) and the two never disagree.
+
 ### Codex's own cross-edition reconciliation (background, for context)
 
 Codex tracks each ABS/Goodreads/Kavita "edition" of a work as a separate

@@ -15,6 +15,15 @@ function formatDuration(s: number | null): string | null {
  *  actual navigation (not just labels) — see docs/AUDEX_NAVIGATION.md's
  *  "clickable author/series/title" principle. Reached from a library-grid
  *  card; Play/Read are the actions FROM here, not skipped past it. */
+/** One wording for "did this change also reach Codex?" — used by Edit details and Merge alike. */
+function codexNote(state?: string): string | undefined {
+  if (state === "not-linked")
+    return "Saved to Audiobookshelf. Link your Codex account in Settings so this fix reaches Codex too — until then Codex's older value is still shown.";
+  if (state === "failed")
+    return "Saved to Audiobookshelf, but Codex didn't accept the change — Codex's older value may still be shown.";
+  return undefined;
+}
+
 /** Comma/newline separated text <-> list, for the multi-value fields. */
 const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(Boolean);
 
@@ -22,7 +31,7 @@ const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(B
  *  title/author/series/ASIN/ISBN is what stops an ebook and its audiobook from
  *  showing up as one book, and the fix belongs in the library (so the Audex and
  *  Codex apps benefit too), not in a local workaround. */
-function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSaved: () => void; onCancel: () => void }) {
+function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSaved: (note?: string) => void; onCancel: () => void }) {
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle ?? "");
   const [authors, setAuthors] = useState(book.authorList.join(", "));
@@ -45,7 +54,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
     setBusy(true);
     setErr(null);
     try {
-      await api.updateMetadata(book.id, {
+      const res = await api.updateMetadata(book.id, {
         title,
         subtitle,
         authors: splitList(authors),
@@ -60,7 +69,9 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
         genres: splitList(genres),
         alsoPaired,
       });
-      onSaved();
+      // Codex is the source of truth for these details. If this fix didn't reach it, Codex's older value would
+      // keep being shown — say so, with the one thing that fixes it.
+      onSaved(codexNote(res.codexSync));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't save.");
       setBusy(false);
@@ -70,7 +81,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
   return (
     <form className="book-detail-section book-edit" onSubmit={save}>
       <div className="l">EDIT DETAILS</div>
-      <p className="sub">Saved to Audiobookshelf, so Audex and Codex pick it up too.</p>
+      <p className="sub">Saved to Audiobookshelf and Codex, so Audex and Codex pick it up too.</p>
       <label htmlFor="ed-title">Title</label>
       <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
       <label htmlFor="ed-sub">Subtitle</label>
@@ -141,7 +152,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
  *  two items and the automatic matching missed them. The change is written to
  *  Audiobookshelf (the other item is made to match this one), so Audex and Codex
  *  merge them too — see the backend's link_editions. */
-function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone: () => void; onCancel: () => void }) {
+function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone: (note?: string) => void; onCancel: () => void }) {
   const wantAudio = book.numAudioFiles <= 0; // this is the ebook → look for its audiobook, and vice versa
   const [q, setQ] = useState(book.title.split(":")[0]);
   const [results, setResults] = useState<Book[]>([]);
@@ -169,8 +180,8 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
     setBusy(true);
     setErr(null);
     try {
-      await api.linkEditions(book.id, b.id);
-      onDone();
+      const res = await api.linkEditions(book.id, b.id);
+      onDone(codexNote(res.codexSync));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't merge.");
       setBusy(false);
@@ -213,6 +224,7 @@ export default function BookDetail() {
   const [editing, setEditing] = useState(false);
   const [merging, setMerging] = useState(false);
   const [reload, setReload] = useState(0);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!itemId) return;
@@ -343,8 +355,9 @@ export default function BookDetail() {
         <MergePicker
           book={book}
           onCancel={() => setMerging(false)}
-          onDone={() => {
+          onDone={(note) => {
             setMerging(false);
+            setSaveNote(note ?? null);
             setReload((n) => n + 1);
           }}
         />
@@ -354,12 +367,14 @@ export default function BookDetail() {
         <EditDetails
           book={book}
           onCancel={() => setEditing(false)}
-          onSaved={() => {
+          onSaved={(note) => {
             setEditing(false);
+            setSaveNote(note ?? null);
             setReload((n) => n + 1);
           }}
         />
       )}
+      {saveNote && <div className="error" role="status">{saveNote}</div>}
 
       {book.description && (
         <div className="book-detail-section">

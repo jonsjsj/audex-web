@@ -149,6 +149,8 @@ export interface LocalBookmark {
 export interface UserPrefs {
   playbackSpeed: number;
   readerFontSize: number;
+  /** Show Codex's checked metadata (fixed author/series/year/…) where Codex has one. */
+  useCodexMeta?: boolean;
 }
 
 export interface ReadAlongStatus {
@@ -250,12 +252,12 @@ export const api = {
     ),
   item: (itemId: string) => request<BookDetail>(`/api/library/items/${itemId}`),
   updateMetadata: (itemId: string, body: MetadataEdit) =>
-    request<{ ok: true; updated: number }>(`/api/library/items/${itemId}/metadata`, {
+    request<{ ok: true; updated: number; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/metadata`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
   linkEditions: (itemId: string, otherId: string) =>
-    request<{ ok: true }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
+    request<{ ok: true; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>

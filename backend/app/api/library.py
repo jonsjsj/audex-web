@@ -14,14 +14,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import AbsConn, connections_for_library, list_connections, resolve, tag
 from app.api.deps import get_current_identity
-from app.core import abs_client
+from app.core import abs_client, codex_client
 from app.core.abs_client import AbsError
 from app.core.catalog_match import pair_dual_format
-from app.core.database import Identity, get_db
+from app.core.codex_overlay import overlay_item
+from app.core.config import settings
+from app.core.database import Identity, UserSettings, get_db
+from app.core.security import decrypt_value
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -180,6 +184,27 @@ def _narrator_names(item: dict) -> list[str]:
     return names
 
 
+async def _codex_meta_on(identity: Identity, db: AsyncSession) -> bool:
+    """Show Codex's checked metadata? Needs CODEX_URL and the person's own toggle (default on)."""
+    if not settings.CODEX_URL:
+        return False
+    row = (await db.execute(select(UserSettings).where(UserSettings.identity_id == identity.id))).scalar_one_or_none()
+    return row is None or row.use_codex_meta is not False
+
+
+async def _apply_codex(identity: Identity, db: AsyncSession, items: list[dict]) -> None:
+    """Overlay Codex's checked metadata onto raw ABS items, in place, before any view is built from them.
+    Best-effort by design: any Codex problem leaves the items exactly as Audiobookshelf reported them."""
+    try:
+        if not items or not await _codex_meta_on(identity, db):
+            return
+        entries = await codex_client.fetch_meta(settings.CODEX_URL, [i["id"] for i in items if i.get("id")])
+        for it in items:
+            overlay_item(it, entries.get(it.get("id")))
+    except Exception:
+        return
+
+
 async def _conn_book_library_ids(conn: AbsConn) -> list[str]:
     """A connection's book-library ids (podcasts excluded, same as /libraries)."""
     libs = await abs_client.libraries(conn.base_url, conn.token)
@@ -218,6 +243,7 @@ async def _iter_books(
             progress = await _progress_by_item(conn)
             for lid in lib_ids:
                 page = await abs_client.library_items(conn.base_url, conn.token, lid)
+                await _apply_codex(identity, db, page.get("results", []))
                 for item in page.get("results", []):
                     triples.append((conn, item, _book_summary(conn, item, progress.get(item["id"]))))
             ok += 1
@@ -344,6 +370,7 @@ async def get_item(
         item = await abs_client.item_detail(conn.base_url, conn.token, abs_id)
     except AbsError as e:
         raise HTTPException(502, str(e))
+    await _apply_codex(identity, db, [item])
     media = item.get("media") or {}
     try:
         progress = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
@@ -435,6 +462,28 @@ def _abs_metadata(body: MetadataBody, fields: set[str]) -> dict:
     return out
 
 
+async def _forward_to_codex(identity: Identity, db: AsyncSession, abs_id: str, metadata: dict) -> str:
+    """Send a fix made here to Codex as well (the person's own API key), so Codex — the source of truth —
+    records it as a hand edit and its periodic ABS correction doesn't revert it. Returns "ok", "off" (Codex
+    metadata isn't in use), "not-linked", "not-in-codex" or "failed"."""
+    codex_client.forget_meta(abs_id)
+    if not await _codex_meta_on(identity, db):
+        return "off"
+    entries = await codex_client.fetch_meta(settings.CODEX_URL, [abs_id])
+    entry = entries.get(abs_id)
+    if not entry or not entry.get("codex_id"):
+        return "not-in-codex"
+    fields = codex_client.codex_fields_from_abs_metadata(metadata)
+    if not fields:
+        return "ok"          # only things Codex doesn't track (subtitle, ASIN, ISBN)
+    if not identity.codex_token_encrypted:
+        return "not-linked"
+    ok = await codex_client.push_edit(settings.CODEX_URL, decrypt_value(identity.codex_token_encrypted),
+                                      entry["codex_id"], fields)
+    codex_client.forget_meta(abs_id)
+    return "ok" if ok else "failed"
+
+
 @router.patch("/items/{item_id}/metadata")
 async def update_item_metadata(
     item_id: str,
@@ -458,13 +507,18 @@ async def update_item_metadata(
                 targets.append(summary["pairedItemId"])
         except HTTPException:
             pass
+    codex_state = "off"
     for target in targets:
         conn, abs_id = await resolve(identity, db, target)
         try:
             await abs_client.update_metadata(conn.base_url, conn.token, abs_id, metadata)
         except AbsError as e:
             raise HTTPException(502, str(e))
-    return {"ok": True, "updated": len(targets)}
+        state = await _forward_to_codex(identity, db, abs_id, metadata)
+        codex_state = state if codex_state in ("off", "ok") else codex_state
+    # `codexSync` tells the page whether the fix also reached Codex. "not-linked" matters: while Codex still
+    # holds the OLD value for a field, it is what gets shown — link your Codex key in Settings to make it stick.
+    return {"ok": True, "updated": len(targets), "codexSync": codex_state}
 
 
 class LinkBody(BaseModel):
@@ -523,13 +577,18 @@ async def link_editions(
     missing = {k: v for k, v in shared.items() if not mine.get(k)}
     if missing:
         changes.append((item_id, missing))
+    # Same path as Edit details: Audiobookshelf first, then Codex (the source of truth for these details), so a
+    # merge made here isn't undone by Codex's own periodic correction of Audiobookshelf.
+    codex_state = "off"
     for target, metadata in changes:
         conn, abs_id = await resolve(identity, db, target)
         try:
             await abs_client.update_metadata(conn.base_url, conn.token, abs_id, metadata)
         except AbsError as e:
             raise HTTPException(502, str(e))
-    return {"ok": True}
+        state = await _forward_to_codex(identity, db, abs_id, metadata)
+        codex_state = state if codex_state in ("off", "ok") else codex_state
+    return {"ok": True, "codexSync": codex_state}
 
 
 @router.get("/series")
@@ -660,6 +719,22 @@ async def get_cover(
     GET is forwarded with the token attached server-side rather than routed
     through fetch()+blob (simpler, and browsers cache <img> responses for free)."""
     conn, abs_id = await resolve(identity, db, item_id)
+    # A cover someone hand-picked in Codex wins (Codex also writes it into ABS, but this shows it at once).
+    # Enriched covers do NOT: ABS's own cover is the better default.
+    try:
+        if await _codex_meta_on(identity, db):
+            entry = (await codex_client.fetch_meta(settings.CODEX_URL, [abs_id])).get(abs_id) or {}
+            cover = (entry.get("fields") or {}).get("cover_url") or ""
+            if "cover_url" in (entry.get("edited") or []) and cover.lower().startswith(("http://", "https://")):
+                async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                    cr = await client.get(cover)
+                if cr.status_code == 200 and (cr.headers.get("content-type") or "").startswith("image/"):
+                    return StreamingResponse(
+                        iter([cr.content]), media_type=cr.headers["content-type"],
+                        headers={"Cache-Control": "public, max-age=3600"},
+                    )
+    except Exception:
+        pass            # fall through to ABS's own cover
     url = abs_client.cover_url(conn.base_url, abs_id)
     try:
         async with httpx.AsyncClient(timeout=15) as client:

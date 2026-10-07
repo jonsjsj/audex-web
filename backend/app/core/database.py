@@ -112,15 +112,29 @@ class UserSettings(Base):
     notify_readalong = Column(Boolean, default=True)
     playback_speed = Column(Float, default=1.0)
     reader_font_size = Column(Float, default=100.0)
+    # Show Codex's checked metadata (fixed author/series/year/…) instead of Audiobookshelf's raw values
+    # whenever Codex has one — see core/codex_overlay.py. On by default; only does anything when CODEX_URL
+    # is set and the Codex serves /audex/meta.
+    use_codex_meta = Column(Boolean, default=True)
 
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
+def _add_missing_columns(sync_conn) -> None:
+    """create_all makes new tables but never alters existing ones: add columns introduced after a person's
+    database was first created (small, additive, safe to re-run)."""
+    from sqlalchemy import inspect, text
+    cols = {c["name"] for c in inspect(sync_conn).get_columns("user_settings")}
+    if "use_codex_meta" not in cols:
+        sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN use_codex_meta BOOLEAN DEFAULT TRUE"))
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
