@@ -18,7 +18,9 @@ from app.core import activity  # noqa: E402
 class AppearanceModel(unittest.TestCase):
     def test_defaults(self):
         self.assertEqual(clean_appearance(None), {
-            "fontSizePt": 12, "theme": "auto", "font": "publisher", "textColor": "#1a1a1a", "backgroundColor": "#ffffff"})
+            "fontSizePt": 12, "theme": "auto", "font": "publisher", "fontName": "", "lineSpacing": None,
+            "paragraphSpacing": None, "letterSpacing": None, "wordSpacing": None,
+            "textColor": "#1a1a1a", "backgroundColor": "#ffffff"})
 
     def test_points_are_clamped_and_rounded(self):
         self.assertEqual(clean_appearance({"fontSizePt": 200})["fontSizePt"], 48)
@@ -33,6 +35,24 @@ class AppearanceModel(unittest.TestCase):
     def test_junk_is_replaced(self):
         c = clean_appearance({"theme": "neon", "font": "comic", "textColor": "red", "backgroundColor": "#12345"})
         self.assertEqual((c["theme"], c["font"], c["textColor"], c["backgroundColor"]), ("auto", "publisher", "#1a1a1a", "#ffffff"))
+
+    def test_fonts_and_spacing(self):
+        c = clean_appearance({"font": "georgia", "fontName": "x", "lineSpacing": "1.8", "paragraphSpacing": 9,
+                              "letterSpacing": "", "wordSpacing": None})
+        self.assertEqual((c["font"], c["lineSpacing"], c["paragraphSpacing"], c["letterSpacing"], c["wordSpacing"]),
+                         ("georgia", 1.8, 2.0, None, None))   # clamped to the shared ranges; empty/None = the book's own
+        self.assertEqual(clean_appearance({"lineSpacing": 0.2})["lineSpacing"], 1.0)
+        self.assertEqual(clean_appearance({"letterSpacing": 5})["letterSpacing"], 0.5)
+
+    def test_custom_font_name_must_be_safe(self):
+        self.assertEqual(clean_appearance({"font": "custom", "fontName": "  Comic Sans MS "})["fontName"], "Comic Sans MS")
+        for bad in ("bad;name{}", "a" * 61, "", "x\ny"):
+            self.assertEqual(clean_appearance({"font": "custom", "fontName": bad})["fontName"], "")
+
+    def test_defaults_leave_spacing_and_font_alone(self):
+        d = clean_appearance(None)
+        self.assertEqual((d["font"], d["fontName"], d["lineSpacing"], d["paragraphSpacing"], d["letterSpacing"], d["wordSpacing"]),
+                         ("publisher", "", None, None, None, None))
 
     def test_custom_colours_kept(self):
         c = clean_appearance({"theme": "custom", "textColor": "#ABCDEF", "backgroundColor": "#102030"})

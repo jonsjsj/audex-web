@@ -9,16 +9,20 @@ import { useReadAlong } from "../lib/useReadAlong";
 import {
   clampFont,
   DEFAULT_APPEARANCE,
+  FONT_CSS,
   FONT_LABELS,
   FONT_LADDER,
   FONT_MAX_PT,
   FONT_MIN_PT,
+  fontFamilyFor,
   FontChoice,
   NORMAL_PT,
   PRESETS,
   ReaderAppearance,
   resolveColors,
   sanitizeAppearance,
+  SPACING,
+  SpacingKey,
   stepFont,
   ThemeChoice,
   toEpubPreferences,
@@ -1011,19 +1015,68 @@ export default function Reader() {
               </button>
             </div>
 
-            <div className="reader-ap-label">Font</div>
-            <div className="reader-ap-row reader-ap-chips" role="group" aria-label="Font">
-              {(Object.keys(FONT_LABELS) as FontChoice[]).map((f) => (
-                <button
-                  key={f}
-                  className={`reader-font-btn ${appearance.font === f ? "active" : ""}`}
-                  aria-pressed={appearance.font === f}
-                  onClick={act(() => updateAppearance({ font: f }))}
-                >
-                  {FONT_LABELS[f]}
-                </button>
-              ))}
+            <label className="reader-ap-label" htmlFor="ap-font">
+              Font
+            </label>
+            <div className="reader-ap-row">
+              <select
+                id="ap-font"
+                className="reader-ap-select"
+                value={appearance.font}
+                onChange={(e) => updateAppearance({ font: e.target.value as FontChoice })}
+              >
+                {(Object.keys(FONT_LABELS) as FontChoice[]).map((f) => (
+                  <option key={f} value={f} style={{ fontFamily: f === "custom" ? undefined : FONT_CSS[f] ?? undefined }}>
+                    {FONT_LABELS[f]}
+                  </option>
+                ))}
+              </select>
+              {appearance.font === "custom" && (
+                <input
+                  className="reader-ap-fontname"
+                  type="text"
+                  aria-label="Font name"
+                  placeholder="Font name, e.g. Garamond"
+                  defaultValue={appearance.fontName}
+                  onBlur={(e) => updateAppearance({ fontName: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                />
+              )}
             </div>
+            {appearance.font === "custom" && (
+              <p className="reader-panel-note">Any font installed on this device. If it isn't, the book falls back to a serif font.</p>
+            )}
+
+            <div className="reader-ap-label">Spacing</div>
+            {(Object.keys(SPACING) as SpacingKey[]).map((key) => {
+              const sp = SPACING[key];
+              const value = appearance[key];
+              return (
+                <div className="reader-ap-row reader-ap-spacing" key={key}>
+                  <label htmlFor={`ap-${key}`}>{sp.label}</label>
+                  <input
+                    id={`ap-${key}`}
+                    type="range"
+                    min={sp.min}
+                    max={sp.max}
+                    step={sp.step}
+                    value={value ?? sp.start}
+                    onChange={(e) => updateAppearance({ [key]: Number(e.target.value) })}
+                  />
+                  <span className="reader-ap-value">{value === null ? "Book's own" : value.toFixed(key === "letterSpacing" ? 2 : key === "wordSpacing" ? 3 : key === "paragraphSpacing" ? 2 : 1)}</span>
+                  <button
+                    className="reader-font-btn"
+                    onClick={act(() => updateAppearance({ [key]: null }))}
+                    disabled={value === null}
+                    aria-label={`${sp.label}: use the book's own`}
+                  >
+                    Reset
+                  </button>
+                </div>
+              );
+            })}
 
             <div className="reader-ap-label">Colours</div>
             <div className="reader-ap-row reader-ap-chips" role="group" aria-label="Theme">
@@ -1063,7 +1116,17 @@ export default function Reader() {
                   aria-label="Background colour"
                 />
               </label>
-              <span className="reader-ap-sample" style={{ color: bookColors.text, background: bookColors.background }}>
+              <span
+                className="reader-ap-sample"
+                style={{
+                  color: bookColors.text,
+                  background: bookColors.background,
+                  fontFamily: fontFamilyFor(appearance) ?? undefined,
+                  lineHeight: appearance.lineSpacing ?? undefined,
+                  letterSpacing: appearance.letterSpacing !== null ? `${appearance.letterSpacing}em` : undefined,
+                  wordSpacing: appearance.wordSpacing !== null ? `${appearance.wordSpacing}em` : undefined,
+                }}
+              >
                 Sample text
               </span>
             </div>

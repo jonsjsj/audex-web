@@ -2252,3 +2252,47 @@ input:focus {
     white-space: normal;
   }
 }
+.reader-ap-select,
+.reader-ap-fontname {
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+}
+.reader-ap-select {
+  min-width: 11rem;
+}
+.reader-ap-fontname {
+  width: 12rem;
+}
+.reader-ap-spacing {
+  flex-wrap: nowrap;
+}
+.reader-ap-spacing label {
+  margin: 0;
+  min-width: 8.4rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.reader-ap-spacing input[type="range"] {
+  flex: 1;
+  min-width: 5rem;
+  padding: 0;
+}
+.reader-ap-value {
+  min-width: 4.2rem;
+  text-align: right;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+@media (max-width: 40rem) {
+  .reader-ap-spacing {
+    flex-wrap: wrap;
+  }
+  .reader-ap-spacing label {
+    min-width: 100%;
+  }
+}
