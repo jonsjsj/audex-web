@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "react-router-dom";
-import { api, Library as LibraryModel, Me } from "../api/client";
+import { api, Library as LibraryModel, Me, SyncResult } from "../api/client";
 import MiniPlayer from "./MiniPlayer";
 
 // The sentinel library selection: one merged view across every book library,
@@ -29,6 +29,21 @@ export interface ShellContext {
   // mini-player so the book gets the whole window (see .shell-immersive).
   immersive: boolean;
   setImmersive: (v: boolean) => void;
+  // Bumped when "Sync now" finishes so every browse/detail page re-reads its
+  // data from Audiobookshelf (progress, titles, authors…) without a reload.
+  syncSignal: number;
+}
+
+/** One line per service, so a failure says which one. */
+function syncSummary(r: SyncResult): string[] {
+  const lines = r.audiobookshelf.map((s) =>
+    !s.ok
+      ? `Audiobookshelf${r.audiobookshelf.length > 1 ? ` (${s.name})` : ""}: ${s.error ?? "couldn't connect"}`
+      : `Audiobookshelf${r.audiobookshelf.length > 1 ? ` (${s.name})` : ""}: connected${s.rescan === "started" ? ", rescanning files" : ""}`,
+  );
+  if (r.audiobookshelf.length === 0) lines.push("Audiobookshelf: not connected");
+  lines.push(r.codex.state === "not-configured" ? "Codex: not set up" : `Codex: ${r.codex.detail}`);
+  return lines;
 }
 
 // The top-level browse pages that share the persistent search bar. Detail
@@ -61,6 +76,24 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const [resetSignal, setResetSignal] = useState(0);
   const [immersive, setImmersive] = useState(false);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const [syncSignal, setSyncSignal] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncLines, setSyncLines] = useState<string[] | null>(null);
+
+  async function syncNow() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncLines(null);
+    try {
+      const result = await api.syncNow();
+      setSyncLines(syncSummary(result));
+    } catch (e) {
+      setSyncLines([e instanceof Error ? e.message : "Sync failed."]);
+    }
+    loadLibraries();
+    setSyncSignal((n) => n + 1);
+    setSyncing(false);
+  }
 
   function toggleCollapsed() {
     setCollapsed((v) => {
@@ -107,7 +140,7 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
   const ctx: ShellContext = {
     libraries, libraryId, error, me, onChanged, onSignedOut, search, setSearch, resetSignal,
     refreshLibraries: loadLibraries,
-    immersive, setImmersive,
+    immersive, setImmersive, syncSignal,
   };
   const showSearch = SEARCHABLE_PATHS.has(location.pathname);
 
@@ -159,6 +192,22 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
             Narrators
           </NavLink>
         </nav>
+
+        <div className="shell-sync">
+          <button className="shell-sync-btn" onClick={syncNow} disabled={syncing} aria-label="Sync now">
+            {syncing ? "Syncing…" : "⟳ Sync now"}
+          </button>
+          {syncLines && (
+            <div className="shell-sync-result" role="status">
+              {syncLines.map((l) => (
+                <div key={l}>{l}</div>
+              ))}
+              <button className="shell-sync-dismiss" onClick={() => setSyncLines(null)} aria-label="Dismiss">
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
 
         <NavLink to="/settings" className="shell-nav-link shell-settings-link">
           Settings

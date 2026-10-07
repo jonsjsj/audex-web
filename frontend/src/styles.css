@@ -2071,3 +2071,46 @@ input:focus {
   font-size: 0.95rem;
   resize: vertical;
 }
+
+/* Manual sync (sidebar) */
+.shell-sync {
+  margin-top: auto;
+  padding: 0.6rem 0.2rem;
+}
+.shell-sync-btn {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.shell-sync-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.shell-sync-result {
+  position: relative;
+  margin-top: 0.5rem;
+  padding: 0.5rem 1.4rem 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--ink-soft, var(--ink));
+}
+.shell-sync-dismiss {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.3rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.shell-sync + .shell-settings-link {
+  margin-top: 0;
+}

@@ -13,7 +13,7 @@ const SORTS: GroupSort[] = [
 
 export default function Narrators() {
   const navigate = useNavigate();
-  const { libraryId, search } = useShell();
+  const { libraryId, search, syncSignal } = useShell();
   const [groups, setGroups] = useState<BookGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +24,7 @@ export default function Narrators() {
       .narrators(libraryId)
       .then(setGroups)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load narrators."));
-  }, [libraryId]);
+  }, [libraryId, syncSignal]);
 
   if (error) return <div className="error" style={{ margin: "1.5rem" }}>{error}</div>;
   if (!groups) return <p className="sub" style={{ padding: "1.5rem" }}>Loading narrators…</p>;

@@ -206,7 +206,7 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
 export default function BookDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
-  const { libraryId } = useShell();
+  const { libraryId, syncSignal } = useShell();
   const [book, setBook] = useState<BookDetailModel | null>(null);
   const [nextInSeries, setNextInSeries] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -220,7 +220,7 @@ export default function BookDetail() {
       .item(itemId)
       .then(setBook)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this book."));
-  }, [itemId, reload]);
+  }, [itemId, reload, syncSignal]);
 
   // "Next: #N Title" — mirrors the mobile app's WorkDetailScreen. Reuses the
   // same grouped-series endpoint Series/SeriesDetail already fetch, rather

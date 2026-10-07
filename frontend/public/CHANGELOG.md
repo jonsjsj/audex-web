@@ -7,6 +7,16 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.6.2] - 2026-10-07
+
+### Added
+- **Sync now (side menu).** One button that checks both services and says which
+  worked: it re-reads everything from Audiobookshelf (progress, titles, authors,
+  covers — on every open page, no reload), asks Audiobookshelf to re-scan its
+  files for changed book info (admin accounts only; otherwise it just says so),
+  and tells Codex to sync from Audiobookshelf right away instead of waiting for
+  its own schedule, so reading progress shows up there now.
+
 ## [0.6.1] - 2026-10-07
 
 ### Added

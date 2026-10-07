@@ -190,6 +190,11 @@ export type ReadiumManifest = Record<string, unknown>;
 // .serialize() — see @readium/shared's own Locator.ts for the real shape.
 export type ReadiumLocator = Record<string, unknown>;
 
+export interface SyncResult {
+  audiobookshelf: { name: string; ok: boolean; rescan: "started" | "not-allowed" | "no"; error: string | null }[];
+  codex: { state: "started" | "failed" | "not-linked" | "not-configured"; detail: string };
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -235,6 +240,7 @@ export const api = {
     }),
   removeAbsServer: (key: string) =>
     request<{ ok: true }>(`/api/auth/abs/servers/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  syncNow: () => request<SyncResult>("/api/sync", { method: "POST" }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
 
   libraries: () => request<Library[]>("/api/library/libraries"),
