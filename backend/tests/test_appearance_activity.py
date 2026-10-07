@@ -72,5 +72,21 @@ class ErrorWording(unittest.TestCase):
         self.assertIn("certificate", activity.describe_error(httpx.ConnectError("SSL: CERTIFICATE_VERIFY_FAILED")))
 
 
+class UpdateEnvironment(unittest.TestCase):
+    def test_baked_and_stale_values_are_not_copied(self):
+        from app.api.admin import user_env
+        container = ["PATH=/usr/bin", "PYTHON_VERSION=3.12.1", "APP_VERSION=0.5.2", "SECRET_KEY=s3cret", "CODEX_URL=http://codex:8000"]
+        image = {"PATH=/usr/bin", "PYTHON_VERSION=3.12.1", "APP_VERSION=0.7.2"}
+        self.assertEqual(user_env(container, image), ["SECRET_KEY=s3cret", "CODEX_URL=http://codex:8000"])
+
+    def test_app_version_is_dropped_even_when_the_image_cannot_be_inspected(self):
+        from app.api.admin import user_env
+        self.assertEqual(user_env(["APP_VERSION=0.5.2", "ABS_URL=http://abs"], set()), ["ABS_URL=http://abs"])
+
+    def test_a_value_the_person_changed_from_the_image_default_is_kept(self):
+        from app.api.admin import user_env
+        self.assertEqual(user_env(["LANG=nb_NO.UTF-8"], {"LANG=C.UTF-8"}), ["LANG=nb_NO.UTF-8"])
+
+
 if __name__ == "__main__":
     unittest.main()

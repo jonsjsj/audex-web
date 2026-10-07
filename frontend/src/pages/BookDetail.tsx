@@ -342,6 +342,22 @@ export default function BookDetail() {
             <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setEditing((v) => !v)}>
               Edit details
             </button>
+            {book.pairedItemId && (
+              <button
+                className="btn btn-secondary"
+                style={{ width: "auto" }}
+                title="They are two different books — show them separately from now on"
+                onClick={() => {
+                  if (!window.confirm("Show the audiobook and the ebook as two separate books from now on?")) return;
+                  api
+                    .unlinkEditions(book.id, book.pairedItemId!)
+                    .then(() => navigate("/"))
+                    .catch((e) => setError(e instanceof Error ? e.message : "Couldn't separate them."));
+                }}
+              >
+                Not the same book
+              </button>
+            )}
             {!book.pairedItemId && (book.numAudioFiles > 0) !== book.hasEbook && (
               <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setMerging((v) => !v)}>
                 Merge with {book.numAudioFiles > 0 ? "ebook" : "audiobook"}…

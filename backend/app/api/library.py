@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import AbsConn, connections_for_library, list_connections, resolve, tag
@@ -24,7 +24,7 @@ from app.core.abs_client import AbsError
 from app.core.catalog_match import pair_dual_format
 from app.core.codex_overlay import overlay_item
 from app.core.config import settings
-from app.core.database import Identity, UserSettings, get_db
+from app.core.database import EditionLink, Identity, UserSettings, get_db
 from app.core.security import decrypt_value
 
 router = APIRouter(prefix="/api/library", tags=["library"])
@@ -255,12 +255,30 @@ async def _iter_books(
     return triples
 
 
-def _run_pairing(triples: list[tuple[AbsConn, dict, dict]]) -> None:
+async def _load_links(identity: Identity, db: AsyncSession) -> tuple[frozenset, frozenset]:
+    """The person's own merge / separate decisions (see EditionLink): ({joined pairs}, {separated pairs})."""
+    rows = (await db.execute(select(EditionLink).where(EditionLink.identity_id == identity.id))).scalars().all()
+    joins = frozenset(frozenset((r.a_id, r.b_id)) for r in rows if r.kind == "join")
+    splits = frozenset(frozenset((r.a_id, r.b_id)) for r in rows if r.kind == "split")
+    return joins, splits
+
+
+async def _set_link(identity: Identity, db: AsyncSession, id_a: str, id_b: str, kind: str | None) -> None:
+    """Record (or, with kind=None, clear) the decision about one pair — a join replaces a split and vice versa."""
+    a, b = sorted((id_a, id_b))
+    await db.execute(delete(EditionLink).where(
+        EditionLink.identity_id == identity.id, EditionLink.a_id == a, EditionLink.b_id == b))
+    if kind:
+        db.add(EditionLink(identity_id=identity.id, a_id=a, b_id=b, kind=kind))
+    await db.commit()
+
+
+def _run_pairing(triples: list[tuple[AbsConn, dict, dict]], links: tuple[frozenset, frozenset] = (frozenset(), frozenset())) -> None:
     entries = [
         {"book": book, "meta": (item.get("media") or {}).get("metadata") or {}}
         for _conn, item, book in triples
     ]
-    pair_dual_format(entries)
+    pair_dual_format(entries, *links)
 
 
 def _merge_pairs(triples: list[tuple[AbsConn, dict, dict]]) -> list[tuple[AbsConn, dict, dict]]:
@@ -301,11 +319,12 @@ async def _iter_books_paired(
     (the default) the two items of a pair come back as ONE book (_merge_pairs);
     the read-along bulk-status needs the unmerged list."""
     triples = await _iter_books(identity, db, library_sel)
+    links = await _load_links(identity, db)
     if library_sel == "all":
-        _run_pairing(triples)
+        _run_pairing(triples, links)
     else:
         all_triples = await _iter_books(identity, db, "all")
-        _run_pairing(all_triples)
+        _run_pairing(all_triples, links)
         paired_by_id = {b["id"]: b.get("pairedItemId") for _, _, b in all_triples}
         for _, _, b in triples:
             b["pairedItemId"] = paired_by_id.get(b["id"])
@@ -389,7 +408,7 @@ async def get_item(
     # one, but a failure here shouldn't break the detail page over a toggle.
     try:
         others = [t for t in await _iter_books(identity, db, "all") if t[2]["id"] != summary["id"]]
-        _run_pairing([*others, (conn, item, summary)])
+        _run_pairing([*others, (conn, item, summary)], await _load_links(identity, db))
     except HTTPException:
         pass
     await _share_twin_progress(identity, db, summary)
@@ -588,7 +607,24 @@ async def link_editions(
             raise HTTPException(502, str(e))
         state = await _forward_to_codex(identity, db, abs_id, metadata)
         codex_state = state if codex_state in ("off", "ok") else codex_state
+    # Remember the decision here too, so it holds even if Audiobookshelf's metadata is later changed back
+    # (Codex's periodic correction of Audiobookshelf would otherwise silently split the pair again).
+    await _set_link(identity, db, item_id, body.otherId, "join")
     return {"ok": True, "codexSync": codex_state}
+
+
+@router.post("/items/{item_id}/unlink")
+async def unlink_editions(
+    item_id: str,
+    body: LinkBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """"These are NOT the same book": shown separately from now on, and never paired automatically again."""
+    if body.otherId == item_id:
+        raise HTTPException(400, "Pick the other edition.")
+    await _set_link(identity, db, item_id, body.otherId, "split")
+    return {"ok": True}
 
 
 @router.get("/series")

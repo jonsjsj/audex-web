@@ -56,6 +56,12 @@ def _write_status(state: str, step: str, target: str) -> None:
         pass  # best-effort; a missing status file just reads back as "idle"
 
 
+def user_env(container_env: list[str], image_env: set[str]) -> list[str]:
+    """The environment to carry into the re-created container: what the person set, not what the old image
+    baked in, and never APP_VERSION (stamped at build — carrying it makes the new code report the old version)."""
+    return [e for e in container_env if e not in image_env and not e.startswith("APP_VERSION=")]
+
+
 async def _pull_image(client: httpx.AsyncClient, image: str, tag: str) -> None:
     """Pull an image via the Docker API, raising a DESCRIPTIVE error if the
     registry rejects it. This is the single most common self-update failure
@@ -235,9 +241,20 @@ async def _do_update():
         networks = (info.get("NetworkSettings") or {}).get("Networks") or {}
         net_mode = host_cfg.get("NetworkMode") or "default"
         own_id = info.get("Id") or ""
+        # Environment: only what the person SET. A container's inspected Env also contains everything its IMAGE
+        # baked in (PATH, PYTHON_VERSION, and APP_VERSION — the version stamped at build). Copying those into the
+        # new container overrides the NEW image's values with the old ones: the new code then ran labelled as the
+        # old version, so the app kept offering the same update and looked like it couldn't update.
+        image_env: set[str] = set()
+        image_ref = info.get("Image")
+        if image_ref:
+            ir = await client.get(f"/images/{image_ref}/json")
+            if ir.status_code == 200:
+                image_env = set(((ir.json() or {}).get("Config") or {}).get("Env") or [])
+        env = user_env(cfg.get("Env") or [], image_env)
         spec = {
             "Image": settings.UPDATE_IMAGE,
-            "Env": cfg.get("Env") or [],
+            "Env": env,
             "ExposedPorts": cfg.get("ExposedPorts") or {},
             "Labels": cfg.get("Labels") or {},
             "HostConfig": {

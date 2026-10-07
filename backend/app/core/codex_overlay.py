@@ -41,6 +41,10 @@ def overlay_item(item: dict, entry: dict | None) -> bool:
         put("title", fields["title"])
     if fields.get("author"):
         names = [n for n in _AUTHOR_SPLIT.split(fields["author"]) if n.strip()]
+        if "_authorsAbs" not in meta:
+            # Keep what Audiobookshelf listed — matching an ebook to its audiobook uses both spellings.
+            meta["_authorsAbs"] = [a.get("name") for a in (meta.get("authors") or []) if a.get("name")] or (
+                [meta["authorName"]] if meta.get("authorName") else [])
         ids = {_key(a.get("name")): a.get("id") for a in (meta.get("authors") or []) if a.get("name")}
         put("authors", [({"id": ids[_key(n)], "name": n} if ids.get(_key(n)) else {"name": n}) for n in names])
         put("authorName", ", ".join(names))

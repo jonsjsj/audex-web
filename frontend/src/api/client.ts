@@ -278,6 +278,8 @@ export const api = {
     }),
   linkEditions: (itemId: string, otherId: string) =>
     request<{ ok: true; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
+  unlinkEditions: (itemId: string, otherId: string) =>
+    request<{ ok: true }>(`/api/library/items/${itemId}/unlink`, { method: "POST", body: JSON.stringify({ otherId }) }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>

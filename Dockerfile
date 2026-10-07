@@ -20,6 +20,10 @@ COPY --from=frontend-builder /build/frontend/dist /app/static
 
 ARG APP_VERSION=""
 ENV APP_VERSION=${APP_VERSION:-0.1.0}
+# The version is ALSO written to a file the app reads first: a container re-created from an older one can carry
+# that older container's APP_VERSION environment variable (the updater used to copy the whole environment), which
+# made a fully updated app still report the old version.
+RUN echo "${APP_VERSION:-0.1.0}" > /app/VERSION
 
 RUN mkdir -p /data
 VOLUME ["/data"]

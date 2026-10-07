@@ -121,6 +121,20 @@ class UserSettings(Base):
     reader_appearance = Column(String, nullable=True)
 
 
+class EditionLink(Base):
+    """A person's own decision that an ebook and an audiobook ARE (kind "join") or are NOT (kind "split") the
+    same book. Applied before any automatic matching and never moved by it — merges "stick" even when the
+    metadata they were matched on later changes (Codex's periodic correction of Audiobookshelf, a re-scan…).
+    Same contract as the Audex app's EDITION_JOIN / EDITION_SPLIT overrides. a_id < b_id, as app ids."""
+    __tablename__ = "edition_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    identity_id = Column(Integer, index=True, nullable=False)
+    a_id = Column(String, nullable=False)
+    b_id = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # join | split
+
+
 class ActivityLog(Base):
     """What happened when Webdex talked to Audiobookshelf, Codex or GitHub — successes and, above all,
     failures with the reason — shown in Settings → Activity. identity_id NULL = a server-wide event
