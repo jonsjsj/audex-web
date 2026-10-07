@@ -58,6 +58,89 @@ class AutomaticMatching(unittest.TestCase):
         self.assertEqual(paired([e, a]), "a")
 
 
+class SameCasesAsAudex(unittest.TestCase):
+    """The behaviours in Audex's GraphBuilderTest — Webdex should merge what Audex merges."""
+
+    def test_series_and_volume_recovered_from_a_bare_title(self):
+        a = mk("a", "Dungeon Crawler Carl Book 3", ["Matt Dinniman"], audio=True)
+        e = mk("e", "The Dungeon Anarchist's Cookbook", ["Matt Dinniman"], ebook=True, series=("Dungeon Crawler Carl", "3"))
+        self.assertEqual(paired([e, a]), "a")
+
+    def test_same_series_different_volumes_never_join(self):
+        a = mk("a", "Unsouled", ["Will Wight"], audio=True, series=("Cradle", "1"))
+        e = mk("e", "Soulsmith", ["Will Wight"], ebook=True, series=("Cradle", "2"))
+        self.assertIsNone(paired([e, a]))
+
+    def test_subtitle_variants_join(self):
+        self.assertEqual(paired([mk("e", "Warbreaker", ["Brandon Sanderson"], ebook=True),
+                                 mk("a", "Warbreaker: A Novel of the Cosmere", ["Brandon Sanderson"], audio=True)]), "a")
+
+    def test_asin_on_one_and_isbn_on_the_other_fall_through_to_the_title(self):
+        e = mk("e", "The Way of Kings", ["Brandon Sanderson"], ebook=True)
+        e["meta"]["isbn"] = "9780765326355"
+        a = mk("a", "The Way of Kings", ["Brandon Sanderson"], audio=True, asin="B003ZWFO7E")
+        self.assertEqual(paired([e, a]), "a")
+
+    def test_omnibus_never_matches_a_single_volume(self):
+        a = mk("a", "Cradle: Foundation (Books 1\u20133)", ["Will Wight"], audio=True)
+        e = mk("e", "Unsouled (Cradle #1)", ["Will Wight"], ebook=True, series=("Cradle", "1"))
+        self.assertIsNone(paired([e, a]))
+
+    def test_the_ebook_has_no_series_and_a_different_author_spelling(self):
+        # Your He Who Fights with Monsters 13: the audiobook carries the series; the ebook only has it in its title,
+        # and the two list different author names (pen name vs real name).
+        e = mk("e", "He Who Fights with Monsters 13: A LitRPG Adventure", ["Travis Deverell"], ebook=True)
+        a = mk("a", "He Who Fights with Monsters 13: A LitRPG Adventure: He Who Fights with Monsters, Book 13",
+               ["Shirtaloon"], audio=True, series=("He Who Fights with Monsters", "13"))
+        self.assertEqual(paired([e, a]), "a")
+
+    def test_the_neighbouring_volume_is_not_picked_up(self):
+        e = mk("e", "He Who Fights with Monsters 12: A LitRPG Adventure", ["Travis Deverell"], ebook=True)
+        a = mk("a", "He Who Fights with Monsters 13: A LitRPG Adventure", ["Travis Deverell"], audio=True,
+               series=("He Who Fights with Monsters", "13"))
+        self.assertIsNone(paired([e, a]))
+
+
+class CodexMergesCarryOver(unittest.TestCase):
+    """Codex reports which Audiobookshelf items it merged into one work (`editions`); Webdex follows it."""
+
+    def _triples(self):
+        from app.api.connections import AbsConn
+        conn = AbsConn(key="", base_url="http://abs", token="t", username="u", name="abs", is_primary=True)
+
+        def item(id_, title, author, *, ebook, audio, editions=None):
+            meta = {"title": title, "authors": [{"name": author}], "authorName": author}
+            if editions:
+                meta["_codexEditions"] = editions
+            media = {"metadata": meta, "numAudioFiles": 3 if audio else 0, "ebookFormat": "epub" if ebook else None}
+            raw = {"id": id_, "mediaType": "book", "media": media}
+            book = {"id": id_, "title": title, "subtitle": None, "numAudioFiles": media["numAudioFiles"],
+                    "hasEbook": ebook, "pairedItemId": None}
+            return conn, raw, book
+
+        # Nothing in the metadata says these are the same book — only Codex's merge does.
+        return [item("e1", "Wizard's Tale", "J. Doe", ebook=True, audio=False, editions=["a1"]),
+                item("a1", "Das Zauberbuch", "Someone Else", ebook=False, audio=True, editions=["e1"])]
+
+    def test_a_merge_made_in_codex_pairs_the_editions(self):
+        from app.api.library import _run_pairing
+        triples = self._triples()
+        _run_pairing(triples)
+        self.assertEqual(triples[0][2]["pairedItemId"], "a1")
+        self.assertEqual(triples[1][2]["pairedItemId"], "e1")
+
+    def test_your_own_split_still_wins(self):
+        from app.api.library import _run_pairing
+        triples = self._triples()
+        _run_pairing(triples, (frozenset(), frozenset({frozenset(("e1", "a1"))})))
+        self.assertIsNone(triples[0][2]["pairedItemId"])
+
+    def test_overlay_keeps_the_editions_even_without_fields(self):
+        item = {"id": "e1", "media": {"metadata": {"title": "T"}}}
+        self.assertTrue(overlay_item(item, {"fields": {}, "editions": ["a1"], "codex_id": 5}))
+        self.assertEqual(item["media"]["metadata"]["_codexEditions"], ["a1"])
+
+
 class YourOwnDecisionsStick(unittest.TestCase):
     def test_a_join_pairs_books_the_metadata_cannot(self):
         e = mk("e", "Wizard's Tale", ["J. Doe"], ebook=True)
@@ -72,6 +155,12 @@ class YourOwnDecisionsStick(unittest.TestCase):
         auto = mk("auto", "Dune", ["Frank Herbert"], audio=True)
         chosen = mk("chosen", "Anything Else", ["Other Person"], audio=True)
         self.assertEqual(paired([e, auto, chosen], joins=frozenset({frozenset(("e", "chosen"))})), "chosen")
+
+    def test_a_split_beats_a_codex_merge(self):
+        e = mk("e", "Wizard's Tale", ["J. Doe"], ebook=True)
+        a = mk("a", "Das Zauberbuch", ["Someone Else"], audio=True)
+        pair = frozenset(("e", "a"))
+        self.assertIsNone(paired([e, a], joins=frozenset({pair}), splits=frozenset({pair})))
 
     def test_a_split_is_never_paired_automatically(self):
         e = mk("e", "Dune", ["Frank Herbert"], ebook=True)

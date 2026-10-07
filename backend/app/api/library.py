@@ -278,7 +278,13 @@ def _run_pairing(triples: list[tuple[AbsConn, dict, dict]], links: tuple[frozens
         {"book": book, "meta": (item.get("media") or {}).get("metadata") or {}}
         for _conn, item, book in triples
     ]
-    pair_dual_format(entries, *links)
+    # Codex already knows which Audiobookshelf items are one book (a merge made there). Follow it.
+    joins, splits = links
+    from_codex = set()
+    for conn, item, book in triples:
+        for other in ((item.get("media") or {}).get("metadata") or {}).get("_codexEditions") or []:
+            from_codex.add(frozenset((book["id"], tag(conn, other))))
+    pair_dual_format(entries, frozenset(joins) | frozenset(from_codex), splits)
 
 
 def _merge_pairs(triples: list[tuple[AbsConn, dict, dict]]) -> list[tuple[AbsConn, dict, dict]]:
@@ -503,6 +509,40 @@ async def _forward_to_codex(identity: Identity, db: AsyncSession, abs_id: str, m
     return "ok" if ok else "failed"
 
 
+async def _tell_codex_about_merge(identity: Identity, db: AsyncSession, id_a: str, id_b: str, merged: bool) -> str:
+    """Make Codex agree with a merge ("these are one book") or a separation made here, so Audex, Codex and Webdex
+    all show the same thing. Codex only knows the primary server's items. Returns "ok", "already" (Codex already
+    agreed), "off", "not-linked", "not-in-codex", "merged-in-codex" (asked to separate two that Codex has merged —
+    that has to be undone in Codex) or "failed"."""
+    try:
+        (conn_a, abs_a), (conn_b, abs_b) = await resolve(identity, db, id_a), await resolve(identity, db, id_b)
+    except HTTPException:
+        return "not-in-codex"
+    if not (conn_a.is_primary and conn_b.is_primary):
+        return "not-in-codex"
+    codex_client.forget_meta(abs_a)
+    codex_client.forget_meta(abs_b)
+    if not await _codex_meta_on(identity, db):
+        return "off"
+    entries = await codex_client.fetch_meta(settings.CODEX_URL, [abs_a, abs_b])
+    ea, eb = entries.get(abs_a), entries.get(abs_b)
+    if not ea or not eb or not ea.get("codex_id") or not eb.get("codex_id"):
+        return "not-in-codex"
+    ca, cb = ea["codex_id"], eb["codex_id"]
+    if ca == cb:
+        return "already" if merged else "merged-in-codex"
+    if not identity.codex_token_encrypted:
+        return "not-linked"
+    token = decrypt_value(identity.codex_token_encrypted)
+    if merged:
+        ok, _why = await codex_client.merge_works(settings.CODEX_URL, token, ca, cb)
+    else:
+        ok, _why = await codex_client.keep_apart(settings.CODEX_URL, token, [ca, cb])
+    codex_client.forget_meta(abs_a)
+    codex_client.forget_meta(abs_b)
+    return "ok" if ok else "failed"
+
+
 @router.patch("/items/{item_id}/metadata")
 async def update_item_metadata(
     item_id: str,
@@ -610,7 +650,8 @@ async def link_editions(
     # Remember the decision here too, so it holds even if Audiobookshelf's metadata is later changed back
     # (Codex's periodic correction of Audiobookshelf would otherwise silently split the pair again).
     await _set_link(identity, db, item_id, body.otherId, "join")
-    return {"ok": True, "codexSync": codex_state}
+    codex_merge = await _tell_codex_about_merge(identity, db, item_id, body.otherId, True)
+    return {"ok": True, "codexSync": codex_state, "codexMerge": codex_merge}
 
 
 @router.post("/items/{item_id}/unlink")
@@ -624,7 +665,7 @@ async def unlink_editions(
     if body.otherId == item_id:
         raise HTTPException(400, "Pick the other edition.")
     await _set_link(identity, db, item_id, body.otherId, "split")
-    return {"ok": True}
+    return {"ok": True, "codexMerge": await _tell_codex_about_merge(identity, db, item_id, body.otherId, False)}
 
 
 @router.get("/series")

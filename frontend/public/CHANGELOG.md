@@ -7,6 +7,21 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.4] - 2026-10-07
+
+### Fixed
+- **Webdex now merges what Audex and Codex merge.** Audex showed an audiobook and its ebook as one book but Webdex
+  kept splitting them. Webdex now follows Codex's own merges (Codex reports which Audiobookshelf items it merged
+  — needs the matching Codex update) and uses the same series-aware matching as Audex: a series and volume
+  recovered from a bare title ("Dungeon Crawler Carl Book 3"), "same series + same volume" joining two editions
+  whose titles differ, and the title cleanup that drops a "<Series> 13:" prefix. Different volumes of a series
+  still never join. Audex's own test cases are in Webdex's test suite.
+
+### Added
+- **A merge made in Webdex now reaches Codex.** *Merge with another edition* also merges the two works in Codex
+  (and *Not the same book* tells Codex to keep them apart), so Audex, Codex and Webdex agree. If Codex isn't linked,
+  doesn't have both editions, or refuses, the page says so instead of staying silent.
+
 ## [0.7.3] - 2026-10-07
 
 ### Fixed

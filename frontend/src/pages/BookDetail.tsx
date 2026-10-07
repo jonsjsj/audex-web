@@ -24,6 +24,16 @@ function codexNote(state?: string): string | undefined {
   return undefined;
 }
 
+/** Did a merge (or separation) made here also reach Codex? Say so when it didn't — Codex is where the three apps agree. */
+function codexMergeNote(state?: string, merged = true): string | undefined {
+  const done = merged ? "Merged here" : "Separated here";
+  if (state === "not-linked") return `${done}, but Codex isn't linked — link your Codex account in Settings so Codex does the same.`;
+  if (state === "failed") return `${done}, but Codex didn't accept it — they may still look ${merged ? "separate" : "merged"} in Codex.`;
+  if (state === "not-in-codex") return `${done}. Codex doesn't have both editions yet, so it hasn't been told.`;
+  if (state === "merged-in-codex") return "Separated here, but Codex still has them merged — separate them in Codex too, or the other apps will follow it.";
+  return undefined;
+}
+
 /** Comma/newline separated text <-> list, for the multi-value fields. */
 const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(Boolean);
 
@@ -181,7 +191,7 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
     setErr(null);
     try {
       const res = await api.linkEditions(book.id, b.id);
-      onDone(codexNote(res.codexSync));
+      onDone([codexNote(res.codexSync), codexMergeNote(res.codexMerge)].filter(Boolean).join(" ") || undefined);
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't merge.");
       setBusy(false);
@@ -351,7 +361,11 @@ export default function BookDetail() {
                   if (!window.confirm("Show the audiobook and the ebook as two separate books from now on?")) return;
                   api
                     .unlinkEditions(book.id, book.pairedItemId!)
-                    .then(() => navigate("/"))
+                    .then((res) => {
+                      const note = codexMergeNote(res.codexMerge, false);
+                      if (note) window.alert(note);
+                      navigate("/");
+                    })
                     .catch((e) => setError(e instanceof Error ? e.message : "Couldn't separate them."));
                 }}
               >

@@ -129,8 +129,8 @@ nothing is listed, an item is only reachable by its unguessable ABS id.
 | Call | Purpose |
 |---|---|
 | `GET /audex/config` | Discovery. `meta_via_codex: true` + `meta_item_api: "/audex/meta"` when available. |
-| `GET /audex/meta/{absItemId}` | `{found, fields, edited, codex_id}` for one book. |
-| `POST /audex/meta` `{ids:[…]}` | `{items: {absItemId: {fields, edited, codex_id}}}` — up to **200** ids per call; unknown ids are absent. Use this for lists. |
+| `GET /audex/meta/{absItemId}` | `{found, fields, edited, codex_id, editions}` for one book. |
+| `POST /audex/meta` `{ids:[…]}` | `{items: {absItemId: {fields, edited, codex_id, editions}}}` — up to **200** ids per call; unknown ids are absent. Use this for lists. |
 
 `fields` holds ONLY the keys Codex has a value for: `title, author, narrator, series_name, series_position (float),
 year (int), description, cover_url`. A missing key means "no opinion" — keep ABS's value (never blank it).
@@ -147,6 +147,17 @@ to ABS.
 `PATCH {codex}/media/{codex_id}` (Bearer API key) with Codex's field names (`title, author, narrator,
 series_name, series_position, year`) **as well as** to ABS. Codex then records it as a hand edit (so its own
 periodic ABS correction doesn't revert it) and the two never disagree.
+
+**Merges — one book across apps.** ABS often holds a book's audiobook and ebook as two separate items; the owner
+merges them in Codex. `editions` lists the **other ABS item ids Codex has merged into the same work** (empty when
+none). An id that was merged away still resolves: it returns the surviving work's `fields`, `codex_id` and
+`editions`, so every edition is shown with the same corrected details. **Client rule:** show one card per work —
+treat an item and everything in its `editions` as one book (when one is audio-only and the other ebook-only), ahead
+of any guessing from titles. A person's own "these are NOT the same book" outranks it.
+**Merging from a client:** after merging two editions, send it to Codex so all three apps agree — look up both
+`codex_id`s with `/audex/meta`, then `POST {codex}/media/dedupe/merge` `{canonical_id, duplicate_ids:[other]}`
+(Bearer API key); "not the same book" is `POST {codex}/media/dedupe/dismiss` `{media_ids:[a,b]}`. Two items Codex
+has already merged share one `codex_id` (nothing to do); un-merging is done in Codex.
 
 ### Codex's own cross-edition reconciliation (background, for context)
 

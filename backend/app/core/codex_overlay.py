@@ -25,11 +25,19 @@ def _seq(pos) -> str:
 def overlay_item(item: dict, entry: dict | None) -> bool:
     """Mutate `item` (a raw ABS library item) with Codex's fields. Returns True if anything changed."""
     fields = (entry or {}).get("fields") or {}
-    if not fields:
+    editions = [str(e) for e in ((entry or {}).get("editions") or []) if e]
+    if not fields and not editions:
         return False
     media = item.setdefault("media", {})
     meta = media.setdefault("metadata", {})
     changed = False
+    if editions:
+        # The other Audiobookshelf items Codex has merged into this same work (an audiobook and its ebook): a merge
+        # made in Codex is the source of truth, so pairing follows it — see library._run_pairing.
+        meta["_codexEditions"] = editions
+        changed = True
+    if not fields:
+        return changed
 
     def put(key, value):
         nonlocal changed
