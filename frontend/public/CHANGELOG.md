@@ -7,6 +7,22 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.1] - 2026-10-07
+
+### Fixed
+- **One-click update now keeps the container's Docker network(s), labels, aliases, extra hosts and DNS.** The
+  updater re-created the app with the same environment, volumes and ports but dropped its network — so a
+  container on a stack/proxy network came back on the default one, losing its reverse proxy and anything it
+  reaches by name (Codex, Audiobookshelf…). Other networks are re-attached after it starts.
+- **It finds itself even when it isn't called "audex-web".** Portainer stacks name containers
+  `<stack>-<service>-1`; the updater now falls back to looking itself up by its own container id, and uses the
+  real name for the swap, instead of failing with "couldn't find the running container".
+
+### Added
+- **Test connections → update checks:** finds this container (and shows the networks it keeps), and tests that
+  both images can be pulled from this server — the app from ghcr.io and the small helper from Docker Hub
+  (including Docker Hub's rate limit) — so a failing update points at its cause.
+
 ## [0.7.0] - 2026-10-07
 
 ### Added

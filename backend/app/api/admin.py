@@ -15,6 +15,7 @@ any signed-in person can trigger it, same as every other write endpoint here.
 import json
 import os
 import re
+import socket
 import time
 
 import httpx
@@ -198,7 +199,6 @@ async def _do_update():
         raise HTTPException(400, "No Docker socket mounted — can't self-update from inside the container.")
 
     name = settings.UPDATE_CONTAINER_NAME
-    helper_name = f"{name}-updater"
     image, _, tag = settings.UPDATE_IMAGE.rpartition(":")
     if not image:
         image, tag = tag, "latest"
@@ -210,6 +210,14 @@ async def _do_update():
         # container that's already running with them.
         r = await client.get(f"/containers/{name}/json")
         if r.status_code != 200:
+            # Not called what UPDATE_CONTAINER_NAME says (a Portainer stack names it "<stack>-<service>-1"):
+            # inside a container the hostname IS its own id, so look ourselves up by that instead.
+            own = await client.get(f"/containers/{socket.gethostname()}/json")
+            if own.status_code == 200:
+                r = own
+                name = (own.json().get("Name") or name).lstrip("/")
+        helper_name = f"{name}-updater"
+        if r.status_code != 200:
             raise HTTPException(
                 502,
                 f"Couldn't find the running container named \"{name}\" "
@@ -220,16 +228,34 @@ async def _do_update():
         cfg = info.get("Config") or {}
         host_cfg = info.get("HostConfig") or {}
         binds = host_cfg.get("Binds") or []
+        # The network(s) it is on matter as much as its volumes: a container on a stack/proxy network that is
+        # re-created on the default bridge loses its reverse proxy and any service it reaches by name (Codex…).
+        # Keep the primary network (with its service-name aliases) at create time, and re-attach any others
+        # once it is running (see the helper script).
+        networks = (info.get("NetworkSettings") or {}).get("Networks") or {}
+        net_mode = host_cfg.get("NetworkMode") or "default"
+        own_id = info.get("Id") or ""
         spec = {
             "Image": settings.UPDATE_IMAGE,
             "Env": cfg.get("Env") or [],
             "ExposedPorts": cfg.get("ExposedPorts") or {},
+            "Labels": cfg.get("Labels") or {},
             "HostConfig": {
                 "Binds": binds,
                 "PortBindings": host_cfg.get("PortBindings") or {},
                 "RestartPolicy": host_cfg.get("RestartPolicy") or {"Name": "unless-stopped"},
+                "NetworkMode": net_mode,
+                "ExtraHosts": host_cfg.get("ExtraHosts") or [],
+                "Dns": host_cfg.get("Dns") or [],
             },
         }
+        if net_mode not in ("default", "bridge", "host", "none") and not net_mode.startswith("container:"):
+            aliases = [a for a in (networks.get(net_mode, {}).get("Aliases") or []) if a and not own_id.startswith(a)]
+            spec["NetworkingConfig"] = {"EndpointsConfig": {net_mode: {"Aliases": aliases}}}
+        extra_networks = [
+            n for n in networks
+            if n != net_mode and n not in ("bridge", "host", "none") and not net_mode.startswith("container:")
+        ]
 
         # 1) Pull the NEW app image up front, IN THIS PROCESS, so a failed pull
         # (private/renamed package, wrong tag, no network) is reported to the
@@ -279,6 +305,12 @@ async def _do_update():
             f'curl -fsS --unix-socket {sock} -X POST "http://localhost/containers/create?name={name}" -H "Content-Type: application/json" -d "$SPEC" || {{ w failed create; exit 1; }}',
             "w in_progress start",
             f"curl -fsS --unix-socket {sock} -X POST http://localhost/containers/{name}/start || {{ w failed start; exit 1; }}",
+            # Re-attach the container's other networks (best-effort — the primary one is already set at create).
+            *[
+                f"curl -fsS --unix-socket {sock} -X POST http://localhost/networks/{n}/connect "
+                f"-H 'Content-Type: application/json' -d '{{\"Container\":\"{name}\"}}' || true"
+                for n in extra_networks
+            ],
             "w success done",
         ])
         helper_binds = [f"{sock}:{sock}"]

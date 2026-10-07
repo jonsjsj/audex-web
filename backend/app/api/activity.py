@@ -1,5 +1,6 @@
 """Settings → Activity (the log) and Settings → Connections (test everything now)."""
 import os
+import socket
 import time
 
 import httpx
@@ -126,6 +127,48 @@ async def diagnostics(
             raise _Failed(f"Docker answered {r.status_code}")
         return "Docker socket works — one-click update is possible"
     checks.append(await _timed("Updates · Docker", docker_check()))
+
+    # The two things the one-click update depends on besides Docker itself: finding THIS container, and pulling
+    # both images (the app from ghcr.io, the small helper from Docker Hub) from where this server runs.
+    async def self_check():
+        if not os.path.exists(settings.DOCKER_SOCK):
+            raise _Failed("No Docker socket mounted.")
+        transport = httpx.AsyncHTTPTransport(uds=settings.DOCKER_SOCK)
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=8) as client:
+            for ref in (settings.UPDATE_CONTAINER_NAME, socket.gethostname()):
+                r = await client.get(f"/containers/{ref}/json")
+                if r.status_code == 200:
+                    info = r.json()
+                    nets = ", ".join((info.get("NetworkSettings") or {}).get("Networks", {}).keys()) or "none"
+                    return f"found as \"{(info.get('Name') or '').lstrip('/')}\" · networks: {nets} (the update keeps them)"
+        raise _Failed(f"Couldn't find this container (tried the name \"{settings.UPDATE_CONTAINER_NAME}\" and its own id). Set UPDATE_CONTAINER_NAME to its real name.")
+    checks.append(await _timed("Updates · this container", self_check()))
+
+    async def registry_check(auth_url: str, manifest_url: str, label: str):
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            tr = await client.get(auth_url)
+            if tr.status_code != 200:
+                raise _Failed(f"{label}: token request answered {activity.describe_status(tr.status_code)}")
+            token = (tr.json() or {}).get("token") or (tr.json() or {}).get("access_token")
+            mr = await client.head(manifest_url, headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json",
+            })
+        if mr.status_code != 200:
+            hint = " (rate limit — wait a bit, or log this host in to Docker Hub)" if mr.status_code == 429 else ""
+            raise _Failed(f"{label}: answered {activity.describe_status(mr.status_code)}{hint}")
+        return f"{label} reachable — the image can be pulled from here"
+
+    img, _, tag = settings.UPDATE_IMAGE.rpartition(":")
+    img, tag = (img, tag) if img else (tag, "latest")
+    if img.startswith("ghcr.io/"):
+        repo = img[len("ghcr.io/"):]
+        checks.append(await _timed("Updates · app image (ghcr.io)", registry_check(
+            f"https://ghcr.io/token?scope=repository:{repo}:pull&service=ghcr.io",
+            f"https://ghcr.io/v2/{repo}/manifests/{tag}", f"ghcr.io/{repo}:{tag}")))
+    checks.append(await _timed("Updates · helper image (Docker Hub)", registry_check(
+        "https://auth.docker.io/token?service=registry.docker.io&scope=repository:curlimages/curl:pull",
+        "https://registry-1.docker.io/v2/curlimages/curl/manifests/latest", "curlimages/curl:latest")))
 
     for c in checks:
         if not c["ok"]:
