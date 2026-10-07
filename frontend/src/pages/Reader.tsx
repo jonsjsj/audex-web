@@ -1,11 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@readium/shared";
-import { EpubNavigator, EpubNavigatorListeners, EpubPreferences } from "@readium/navigator";
+import { EpubNavigator, EpubNavigatorListeners } from "@readium/navigator";
 import { api, BookDetail } from "../api/client";
 import { useShell } from "../components/Shell";
 import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
+import {
+  clampFont,
+  DEFAULT_APPEARANCE,
+  FONT_LABELS,
+  FONT_LADDER,
+  FONT_MAX_PT,
+  FONT_MIN_PT,
+  FontChoice,
+  NORMAL_PT,
+  PRESETS,
+  ReaderAppearance,
+  resolveColors,
+  sanitizeAppearance,
+  stepFont,
+  ThemeChoice,
+  toEpubPreferences,
+  usePrefersDark,
+} from "../lib/readerAppearance";
 import { progressionAt, timeAtProgression } from "../lib/syncMap";
 import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
 import {
@@ -24,12 +42,10 @@ import {
 // zip-relative paths, not pre-joined with this prefix).
 const RES_BASE = (itemId: string) => `/api/read/${itemId}/res/`;
 
-// Percent — what's stored in the user's settings (and what every client
-// writes). Readium itself does NOT take a percent: its fontSize preference is
-// a MULTIPLIER (1 = 100%) and only accepts 0.7–4. Handing it 100 or 175 made
-// it silently drop the value as out of range, so A+/A- never changed the text.
-const FONT_SIZES = [87.5, 100, 112.5, 125, 137.5, 150, 175, 200];
-const toReadiumFontSize = (percent: number) => percent / 100;
+// Appearance (text size in free 5% steps, theme, font, colours) lives in
+// lib/readerAppearance.ts — Readium's fontSize is a multiplier (1 = 100%, valid
+// 0.7–4), which that module converts from the stored percent.
+const SAVE_APPEARANCE_MS = 600;
 
 type PageCount = 1 | 2;
 const PAGES_KEY = "audexweb.reader.pages";
@@ -120,8 +136,39 @@ function nearestLocatorForProgression(positions: Locator[], p: number): Locator 
   });
 }
 
-const prefsFor = (fontIdx: number, pages: PageCount) =>
-  new EpubPreferences({ fontSize: toReadiumFontSize(FONT_SIZES[fontIdx]), columnCount: pages });
+/** A font-size box like a word processor's: type any size in points, or pick one from the list. */
+function SizeBox({ id, value, onCommit }: { id: string; value: number; onCommit: (pt: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Number(text.replace(",", "."));
+    if (Number.isFinite(n) && n > 0) onCommit(clampFont(n));
+    else setText(String(value));
+  };
+  return (
+    <span className="reader-ap-size">
+      <input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        list={`${id}-list`}
+        value={text}
+        aria-label="Font size in points"
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+      />
+      <span className="reader-ap-unit">pt</span>
+      <datalist id={`${id}-list`}>
+        {FONT_LADDER.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
+    </span>
+  );
+}
 
 export default function Reader() {
   const { itemId } = useParams<{ itemId: string }>();
@@ -137,7 +184,9 @@ export default function Reader() {
   const [error, setError] = useState<string | null>(null);
   const [reportSent, setReportSent] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [fontSizeIdx, setFontSizeIdx] = useState(1); // index into FONT_SIZES, 100% default
+  const [appearance, setAppearanceState] = useState<ReaderAppearance>(DEFAULT_APPEARANCE);
+  const systemDark = usePrefersDark();
+  const bookColors = resolveColors(appearance, systemDark);
   const [pages, setPages] = useState<PageCount>(loadPages);
   const [progressPct, setProgressPct] = useState<number | null>(null);
   const [fraction, setFraction] = useState(0); // whole-book 0..1, drives the slider
@@ -145,7 +194,7 @@ export default function Reader() {
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [panel, setPanel] = useState<"chapters" | "bookmarks" | "readalong" | null>(null);
+  const [panel, setPanel] = useState<"chapters" | "bookmarks" | "readalong" | "appearance" | null>(null);
   const [follow, setFollow] = useState(loadFollow);
   const [store, setStore] = useState<BookmarkStore | null>(null);
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
@@ -160,7 +209,9 @@ export default function Reader() {
   const weightsRef = useRef<SpineWeights | null>(null);
   // The latest preference values, readable from the async open() closure and
   // from handlers without waiting on a re-render.
-  const fontIdxRef = useRef(1);
+  const appearanceRef = useRef<ReaderAppearance>(DEFAULT_APPEARANCE);
+  const systemDarkRef = useRef(systemDark);
+  const saveAppearanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Follow-the-audio bookkeeping: when a manual page turn last happened, how much
   // of the book one page is (learned from your own page turns), and whether the
   // position change being reported was one WE caused by following.
@@ -251,20 +302,13 @@ export default function Reader() {
         weightsRef.current = buildSpineWeights(manifestJson);
         setToc(flattenToc(manifestJson.toc));
 
-        // A LOCAL var, not the fontSizeIdx STATE — this effect only runs once
-        // per itemId (mount), so the closure below would otherwise always
-        // construct with whatever fontSizeIdx was at mount time (the
-        // hardcoded default), never a preference loaded within this same
-        // async call. setFontSizeIdx (after construction, below) syncs the
-        // UI's A-/A+ buttons to match what was actually applied.
-        let initialFontIdx = 1;
-        if (prefs) {
-          initialFontIdx = FONT_SIZES.reduce(
-            (best, size, i) => (Math.abs(size - prefs.readerFontSize) < Math.abs(FONT_SIZES[best] - prefs.readerFontSize) ? i : best),
-            0,
-          );
-        }
-        fontIdxRef.current = initialFontIdx;
+        // The saved appearance (or defaults: normal size, theme follows the device). Set on the ref FIRST —
+        // this effect only runs once per item, so the navigator below is built from the ref, not state.
+        const initialAppearance = sanitizeAppearance(
+          prefs?.readerAppearance ?? { ...DEFAULT_APPEARANCE, fontSize: prefs?.readerFontSize ?? 100 },
+        );
+        appearanceRef.current = initialAppearance;
+        setAppearanceState(initialAppearance);
 
         const manifest = Manifest.deserialize(manifestJson);
         if (!manifest) throw new Error("This book's manifest couldn't be read.");
@@ -397,7 +441,7 @@ export default function Reader() {
           positions,
           initialLocator,
           {
-            preferences: prefsFor(initialFontIdx, pagesRef.current),
+            preferences: toEpubPreferences(initialAppearance, pagesRef.current, systemDarkRef.current),
             defaults: {},
             keyboardPeripherals: KEYBOARD_PERIPHERALS,
           },
@@ -408,7 +452,6 @@ export default function Reader() {
           return;
         }
         navRef.current = nav;
-        setFontSizeIdx(initialFontIdx);
         setLoading(false);
         if (resumeNote) flash(resumeNote, 4500);
       } catch (e) {
@@ -514,14 +557,28 @@ export default function Reader() {
     e.currentTarget.blur();
   };
 
-  async function changeFontSize(delta: number) {
-    const idx = Math.max(0, Math.min(FONT_SIZES.length - 1, fontIdxRef.current + delta));
-    if (idx === fontIdxRef.current || !navRef.current) return;
-    fontIdxRef.current = idx;
-    setFontSizeIdx(idx);
-    await navRef.current.submitPreferences(prefsFor(idx, pagesRef.current));
-    api.updateSettings({ readerFontSize: FONT_SIZES[idx] }).catch(() => {});
+  /** Change any part of the appearance: applied to the open book at once, saved a moment later. */
+  function updateAppearance(patch: Partial<ReaderAppearance>) {
+    const next = sanitizeAppearance({ ...appearanceRef.current, ...patch });
+    appearanceRef.current = next;
+    setAppearanceState(next);
+    void navRef.current?.submitPreferences(toEpubPreferences(next, pagesRef.current, systemDarkRef.current));
+    if (saveAppearanceTimerRef.current) clearTimeout(saveAppearanceTimerRef.current);
+    saveAppearanceTimerRef.current = setTimeout(() => {
+      api.updateSettings({ readerAppearance: appearanceRef.current }).catch(() => {});
+    }, SAVE_APPEARANCE_MS);
   }
+
+  /** A−/A+ : the next size up/down the usual ladder (9, 10, 11, 12, 14, 16, 18 … pt). */
+  const changeFontSize = (direction: 1 | -1) => updateAppearance({ fontSizePt: stepFont(appearanceRef.current.fontSizePt, direction) });
+
+  // Auto theme: re-apply when the device flips between light and dark.
+  useEffect(() => {
+    systemDarkRef.current = systemDark;
+    if (appearanceRef.current.theme === "auto") {
+      void navRef.current?.submitPreferences(toEpubPreferences(appearanceRef.current, pagesRef.current, systemDark));
+    }
+  }, [systemDark]);
 
   async function changePages(count: PageCount) {
     if (count === pagesRef.current) return;
@@ -532,7 +589,7 @@ export default function Reader() {
     } catch {
       /* per-device convenience only — fine if it doesn't stick */
     }
-    await navRef.current?.submitPreferences(prefsFor(fontIdxRef.current, count));
+    await navRef.current?.submitPreferences(toEpubPreferences(appearanceRef.current, count, systemDarkRef.current));
   }
 
   // ── Bookmarks ───────────────────────────────────────────────────────────
@@ -836,8 +893,8 @@ export default function Reader() {
             className="reader-font-btn"
             onClick={act(() => changeFontSize(-1))}
             aria-label="Smaller text"
-            title={`Smaller text (now ${FONT_SIZES[fontSizeIdx]}%)`}
-            disabled={fontSizeIdx === 0}
+            title={`Smaller text (now ${appearance.fontSizePt} pt)`}
+            disabled={appearance.fontSizePt <= FONT_MIN_PT}
           >
             A-
           </button>
@@ -845,8 +902,8 @@ export default function Reader() {
             className="reader-font-btn"
             onClick={act(() => changeFontSize(1))}
             aria-label="Larger text"
-            title={`Larger text (now ${FONT_SIZES[fontSizeIdx]}%)`}
-            disabled={fontSizeIdx === FONT_SIZES.length - 1}
+            title={`Larger text (now ${appearance.fontSizePt} pt)`}
+            disabled={appearance.fontSizePt >= FONT_MAX_PT}
           >
             A+
           </button>
@@ -901,7 +958,7 @@ export default function Reader() {
         <button className="reader-nav-edge reader-nav-prev" onClick={act(prevPage)} aria-label="Previous page">
           ‹
         </button>
-        <div ref={containerRef} className="reader-frame" />
+        <div ref={containerRef} className="reader-frame" style={{ background: bookColors.background }} />
         <button className="reader-nav-edge reader-nav-next" onClick={act(nextPage)} aria-label="Next page">
           ›
         </button>
@@ -932,6 +989,89 @@ export default function Reader() {
                 </button>
               ))
             )}
+          </div>
+        )}
+        {panel === "appearance" && (
+          <div className="reader-panel reader-appearance" role="dialog" aria-label="Appearance">
+            <div className="reader-panel-title">Appearance</div>
+
+            <label className="reader-ap-label" htmlFor="ap-size">
+              Font size
+            </label>
+            <div className="reader-ap-row">
+              <button className="reader-font-btn" onClick={act(() => changeFontSize(-1))} aria-label="Smaller text" disabled={appearance.fontSizePt <= FONT_MIN_PT}>
+                A−
+              </button>
+              <SizeBox id="ap-size" value={appearance.fontSizePt} onCommit={(pt) => updateAppearance({ fontSizePt: pt })} />
+              <button className="reader-font-btn" onClick={act(() => changeFontSize(1))} aria-label="Larger text" disabled={appearance.fontSizePt >= FONT_MAX_PT}>
+                A+
+              </button>
+              <button className="reader-font-btn" onClick={act(() => updateAppearance({ fontSizePt: NORMAL_PT }))} disabled={appearance.fontSizePt === NORMAL_PT}>
+                Normal
+              </button>
+            </div>
+
+            <div className="reader-ap-label">Font</div>
+            <div className="reader-ap-row reader-ap-chips" role="group" aria-label="Font">
+              {(Object.keys(FONT_LABELS) as FontChoice[]).map((f) => (
+                <button
+                  key={f}
+                  className={`reader-font-btn ${appearance.font === f ? "active" : ""}`}
+                  aria-pressed={appearance.font === f}
+                  onClick={act(() => updateAppearance({ font: f }))}
+                >
+                  {FONT_LABELS[f]}
+                </button>
+              ))}
+            </div>
+
+            <div className="reader-ap-label">Colours</div>
+            <div className="reader-ap-row reader-ap-chips" role="group" aria-label="Theme">
+              {(["auto", "light", "sepia", "dark", "custom"] as ThemeChoice[]).map((t) => (
+                <button
+                  key={t}
+                  className={`reader-font-btn ${appearance.theme === t ? "active" : ""}`}
+                  aria-pressed={appearance.theme === t}
+                  onClick={act(() => {
+                    // Switching to Custom starts from the colours you're looking at now.
+                    if (t === "custom") {
+                      const c = resolveColors(appearanceRef.current, systemDark);
+                      updateAppearance({ theme: "custom", textColor: c.text, backgroundColor: c.background });
+                    } else updateAppearance({ theme: t });
+                  })}
+                >
+                  {t === "auto" ? "Auto (device)" : t[0].toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="reader-ap-row">
+              <label className="reader-ap-color">
+                Text
+                <input
+                  type="color"
+                  value={appearance.theme === "custom" ? appearance.textColor : bookColors.text}
+                  onChange={(e) => updateAppearance({ theme: "custom", textColor: e.target.value, backgroundColor: bookColors.background })}
+                  aria-label="Text colour"
+                />
+              </label>
+              <label className="reader-ap-color">
+                Background
+                <input
+                  type="color"
+                  value={appearance.theme === "custom" ? appearance.backgroundColor : bookColors.background}
+                  onChange={(e) => updateAppearance({ theme: "custom", backgroundColor: e.target.value, textColor: bookColors.text })}
+                  aria-label="Background colour"
+                />
+              </label>
+              <span className="reader-ap-sample" style={{ color: bookColors.text, background: bookColors.background }}>
+                Sample text
+              </span>
+            </div>
+            <div className="reader-ap-row">
+              <button className="reader-font-btn" onClick={act(() => updateAppearance({ ...DEFAULT_APPEARANCE }))}>
+                Reset to defaults
+              </button>
+            </div>
           </div>
         )}
         {panel === "readalong" && canAlign && (
@@ -1041,6 +1181,14 @@ export default function Reader() {
           >
             🔖 <span className="reader-lbl">Bookmarks</span>
             {bookmarks.some((b) => !b.auto) ? ` (${bookmarks.filter((b) => !b.auto).length})` : ""}
+          </button>
+          <button
+            className="reader-font-btn"
+            onClick={act(() => setPanel((p) => (p === "appearance" ? null : "appearance")))}
+            aria-expanded={panel === "appearance"}
+            title="Text size, font and colours"
+          >
+            Aa <span className="reader-lbl">Appearance</span>
           </button>
           {canAlign && (
             <button

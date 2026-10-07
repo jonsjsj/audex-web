@@ -17,12 +17,13 @@ import httpx
 
 async def push_audio_progress(
     codex_url: str, token: str, *, library_item_id: str, current_time_s: float, is_finished: bool,
-) -> None:
+) -> tuple[bool, str]:
     """Best-effort: a Codex outage (or a stale/revoked token) must never
-    disrupt playback. Callers fire this and ignore the result, same as the
-    mobile app does — see play.py."""
+    disrupt playback — so this never raises. It returns (ok, reason) so the caller
+    can LOG a failure (the answer used to be thrown away, which is why "it can't
+    reach Codex" left no trace)."""
     if not codex_url or not token:
-        return
+        return False, "Codex isn't set up or linked"
     url = f"{codex_url.rstrip('/')}/webhooks/abs"
     body = {
         "event": "user_mediaProgressUpdated",
@@ -35,10 +36,15 @@ async def push_audio_progress(
         },
     }
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(url, params={"token": token}, json=body)
-    except httpx.HTTPError:
-        pass
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            r = await client.post(url, params={"token": token}, json=body)
+    except httpx.HTTPError as e:
+        from app.core.activity import describe_error
+        return False, describe_error(e)
+    if r.status_code >= 400:
+        from app.core.activity import describe_status
+        return False, describe_status(r.status_code)
+    return True, "ok"
 
 
 async def verify_token(codex_url: str, token: str) -> bool:
@@ -76,6 +82,13 @@ _config_cache: dict[str, tuple[float, bool]] = {}        # codex url -> (checked
 _down_until: dict[str, float] = {}
 
 
+async def _log_down(action: str, exc: BaseException) -> None:
+    """Record WHY Codex couldn't be reached (once per ten minutes) — a server-wide event, visible to everyone."""
+    from app.core import activity
+    reason = activity.describe_error(exc) if isinstance(exc, httpx.HTTPError) else f"unexpected reply ({exc})"
+    await activity.record(None, "codex", action, False, f"{reason} — using Audiobookshelf's values for now", dedupe_s=600)
+
+
 def _reset_caches() -> None:
     """For tests."""
     _meta_cache.clear()
@@ -98,8 +111,9 @@ async def meta_enabled(codex_url: str) -> bool:
         async with httpx.AsyncClient(timeout=META_TIMEOUT_S) as client:
             r = await client.get(f"{base}/audex/config")
         ok = r.status_code == 200 and bool((r.json() or {}).get("meta_via_codex"))
-    except (httpx.HTTPError, ValueError):
+    except (httpx.HTTPError, ValueError) as e:
         _down_until[base] = time.time() + DOWN_FOR_S
+        await _log_down("Checked metadata (config)", e)
         return False
     _config_cache[base] = (time.time(), ok)
     return ok
@@ -124,8 +138,9 @@ async def fetch_meta(codex_url: str, ids: list[str]) -> dict[str, dict]:
                     items = (r.json() or {}).get("items") or {}
                     for i in chunk:
                         _meta_cache[i] = (time.time(), items.get(i))
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as e:
             _down_until[base] = time.time() + DOWN_FOR_S
+            await _log_down("Checked metadata", e)
     return {i: _meta_cache[i][1] for i in wanted if i in _meta_cache and _meta_cache[i][1]}
 
 
@@ -190,10 +205,12 @@ async def trigger_abs_sync(codex_url: str, token: str) -> tuple[bool, str]:
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.post(url, headers={"Authorization": f"Bearer {token}"})
-    except httpx.HTTPError:
-        return False, "Couldn't reach Codex."
+    except httpx.HTTPError as e:
+        from app.core.activity import describe_error
+        return False, f"Couldn't reach Codex: {describe_error(e)}"
     if r.status_code in (401, 403):
         return False, "Codex didn't accept your token — relink it in Settings."
     if r.status_code != 200:
-        return False, f"Codex answered {r.status_code}."
+        from app.core.activity import describe_status
+        return False, f"Codex answered: {describe_status(r.status_code)}"
     return True, "Codex is syncing."

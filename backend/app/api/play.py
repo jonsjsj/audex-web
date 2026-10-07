@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import list_connections, resolve
 from app.api.deps import get_codex_token, get_current_identity
-from app.core import abs_client, codex_client
+from app.core import abs_client, activity, codex_client
 from app.core.abs_client import AbsError
 from app.core.config import settings
 from app.core.database import Identity, get_db
@@ -80,17 +80,24 @@ async def sync(
     codex_token: str | None = Depends(get_codex_token),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
-    await abs_client.sync_session(
-        conn.base_url, conn.token, body.sessionId,
-        current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
-    )
+    try:
+        await abs_client.sync_session(
+            conn.base_url, conn.token, body.sessionId,
+            current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
+        )
+    except (AbsError, httpx.HTTPError) as e:
+        reason = activity.describe_error(e) if isinstance(e, httpx.HTTPError) else str(e)
+        await activity.record(identity.id, "audiobookshelf", "Save listening position", False, reason, dedupe_s=600)
+        raise HTTPException(502, f"Couldn't save your position to Audiobookshelf: {reason}")
     # Codex only knows the PRIMARY server's items (it computes book-keys from
     # its own ABS connection), so only push those — and with the real abs id.
     if codex_token and conn.is_primary:
-        await codex_client.push_audio_progress(
+        ok, why = await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
             library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
         )
+        if not ok:
+            await activity.record(identity.id, "codex", "Send listening position", False, why, dedupe_s=600)
     return {"ok": True}
 
 
@@ -102,15 +109,23 @@ async def close(
     codex_token: str | None = Depends(get_codex_token),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
-    await abs_client.close_session(
-        conn.base_url, conn.token, body.sessionId,
-        current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
-    )
+    try:
+        await abs_client.close_session(
+            conn.base_url, conn.token, body.sessionId,
+            current_time=body.currentTimeS, time_listened=body.timeListenedS, duration=body.durationS,
+        )
+    except (AbsError, httpx.HTTPError) as e:
+        reason = activity.describe_error(e) if isinstance(e, httpx.HTTPError) else str(e)
+        await activity.record(identity.id, "audiobookshelf", "Finish listening session", False, reason)
+        raise HTTPException(502, f"Couldn't save your position to Audiobookshelf: {reason}")
+    mins = int(body.currentTimeS // 60)
+    await activity.record(identity.id, "audiobookshelf", "Listening position saved", True, f"at {mins // 60}h {mins % 60:02d}m")
     if codex_token and conn.is_primary:
-        await codex_client.push_audio_progress(
+        ok, why = await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
             library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
         )
+        await activity.record(identity.id, "codex", "Send listening position", ok, "Codex has your position" if ok else why)
     return {"ok": True}
 
 

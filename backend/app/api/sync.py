@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.connections import list_connections
 from app.api.deps import get_codex_token, get_current_identity
 from app.api.library import _codex_meta_on
-from app.core import abs_client, codex_client
+from app.core import abs_client, activity, codex_client
 from app.core.abs_client import AbsError
 from app.core.config import settings
 from app.core.database import Identity, get_db
@@ -54,4 +54,11 @@ async def sync_now(
         codex_client.forget_all_meta()
         if codex["state"] == "started":
             codex["detail"] = "Codex is syncing; its checked details are re-read."
+    for s in servers:
+        if not s["ok"]:
+            msg = s["error"] or "couldn't connect"
+        else:
+            msg = {"started": "connected, rescan started", "not-allowed": "connected (rescan needs an Audiobookshelf admin account)"}.get(s["rescan"], "connected")
+        await activity.record(identity.id, "audiobookshelf", f"Sync now · {s['name']}", s["ok"], msg)
+    await activity.record(identity.id, "codex", "Sync now", codex["state"] in ("started", "not-configured"), codex["detail"])
     return {"audiobookshelf": servers, "codex": codex}

@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import AbsConn, resolve
 from app.api.deps import get_current_identity
-from app.core import abs_client
+from app.core import abs_client, activity
 from app.core.abs_client import AbsError
 from app.core.database import Identity, ReaderBookmark, get_db
 from app.core.epub import EpubError, ParsedEpub, build_manifest, parse_epub
@@ -179,6 +179,7 @@ async def save_position(
             conn.base_url, conn.token, abs_id, ebook_location=json.dumps(body.locator), ebook_progress=body.progress,
         )
     except AbsError as e:
+        await activity.record(identity.id, "audiobookshelf", "Save reading position", False, str(e), dedupe_s=600)
         raise HTTPException(502, str(e))
     return {"ok": True}
 

@@ -116,6 +116,24 @@ class UserSettings(Base):
     # whenever Codex has one — see core/codex_overlay.py. On by default; only does anything when CODEX_URL
     # is set and the Codex serves /audex/meta.
     use_codex_meta = Column(Boolean, default=True)
+    # Reader appearance (size, theme, font, colours) as JSON — the model in docs/READER_APPEARANCE.md,
+    # shared with the Audex app. NULL = defaults (size from reader_font_size, theme follows the system).
+    reader_appearance = Column(String, nullable=True)
+
+
+class ActivityLog(Base):
+    """What happened when Webdex talked to Audiobookshelf, Codex or GitHub — successes and, above all,
+    failures with the reason — shown in Settings → Activity. identity_id NULL = a server-wide event
+    (e.g. Codex unreachable), visible to everyone."""
+    __tablename__ = "activity_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    identity_id = Column(Integer, index=True, nullable=True)
+    at = Column(Float, nullable=False, index=True)  # epoch seconds
+    area = Column(String, nullable=False)  # sync | audiobookshelf | codex | update | reader
+    action = Column(String, nullable=False)
+    ok = Column(Boolean, nullable=False, default=True)
+    message = Column(String, nullable=False, default="")
 
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
@@ -129,6 +147,8 @@ def _add_missing_columns(sync_conn) -> None:
     cols = {c["name"] for c in inspect(sync_conn).get_columns("user_settings")}
     if "use_codex_meta" not in cols:
         sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN use_codex_meta BOOLEAN DEFAULT TRUE"))
+    if "reader_appearance" not in cols:
+        sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN reader_appearance VARCHAR"))
 
 
 async def init_db() -> None:
