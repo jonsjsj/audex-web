@@ -2114,3 +2114,141 @@ input:focus {
 .shell-sync + .shell-settings-link {
   margin-top: 0;
 }
+
+/* Reader → Appearance panel */
+.reader-appearance {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.reader-ap-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0;
+  opacity: 0.8;
+}
+.reader-ap-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.reader-ap-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.reader-ap-size input {
+  width: 3.4rem;
+  text-align: center;
+  padding: 0.3rem 0.4rem;
+}
+.reader-ap-unit {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+.reader-ap-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+.reader-ap-color input[type="color"] {
+  width: 2.2rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+}
+.reader-ap-sample {
+  padding: 0.25rem 0.7rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+/* Settings: update actions, connection test, activity log */
+.settings-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+.settings-diag,
+.settings-activity {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.settings-diag li,
+.settings-activity li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+.settings-diag li.bad,
+.settings-activity li.bad {
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--line));
+  background: color-mix(in oklab, var(--danger) 8%, var(--surface));
+}
+.settings-diag li.ok .settings-diag-mark,
+.settings-activity li.ok .settings-diag-mark {
+  color: var(--accent);
+}
+.settings-diag li.bad .settings-diag-mark,
+.settings-activity li.bad .settings-diag-mark {
+  color: var(--danger);
+}
+.settings-diag-mark {
+  font-weight: 700;
+  min-width: 1rem;
+}
+.settings-diag-ms,
+.settings-activity-area {
+  opacity: 0.6;
+  font-size: 0.78rem;
+}
+.settings-diag-detail {
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+.settings-activity-time {
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+.settings-activity-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-weight: 500;
+}
+.settings-check input {
+  width: auto;
+}
+@media (max-width: 40rem) {
+  .settings-activity li {
+    flex-wrap: wrap;
+  }
+  .settings-activity-time {
+    margin-left: 1.6rem;
+    white-space: normal;
+  }
+}

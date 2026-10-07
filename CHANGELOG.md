@@ -7,6 +7,32 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.0] - 2026-10-07
+
+### Added
+- **Reader → Appearance.** Text size in **points** like any word processor — type any size 9–48 pt, pick
+  from the list, or step with A−/A+ through 9 10 11 12 13 14 15 16 18 20 … 48 — and **Normal** is back to
+  12 pt, the book's own size. Choose the **font** (the book's own, serif, sans-serif, monospace) and the
+  **colours**: *Auto* follows your device's light/dark mode (live), or pick Light, Sepia, Dark, or **Custom**
+  text and background colours with a live sample. Saved per person, so every browser agrees. The exact same
+  model (and wording) is in the Audex app — see `docs/READER_APPEARANCE.md`.
+- **Check for updates** button, always visible, that says what it found — including *why* it couldn't (GitHub
+  unreachable, wrong repo…) instead of quietly showing "Up to date".
+- **Connections → Test connections.** Tries Audiobookshelf, Codex (reachable, your account, read-along),
+  GitHub and Docker right now and reports exactly what failed and why (DNS, refused, timeout, certificate,
+  HTTP 401/403/404…).
+- **Activity log (Settings).** Every sync, Codex push, listening/reading save, update check and update, with
+  the reason when it failed; "Failures only" filter, Refresh, Clear.
+
+### Fixed
+- **Failures talking to Codex left no trace.** The answer to the listening-position push was thrown away, so
+  a Codex that rejected or couldn't be reached looked fine. It is now checked and logged with the reason.
+- The update check no longer reports "Up to date" when the check itself failed.
+
+### Changed
+- The reader's page colours now **follow the device's light/dark mode by default** (it was always white).
+  Text size is in points instead of percent (an existing 100% becomes 12 pt).
+
 ## [0.6.3] - 2026-10-07
 
 ### Added

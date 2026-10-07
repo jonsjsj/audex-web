@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AbsServerInfo, api, UpdateCheck } from "../api/client";
+import { AbsServerInfo, ActivityEntry, api, DiagnosticCheck, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
 
 interface ChangelogEntry {
@@ -44,6 +44,11 @@ export default function Settings() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [checkFailed, setCheckFailed] = useState<string | null>(null);
+  const [activityRows, setActivityRows] = useState<ActivityEntry[] | null>(null);
+  const [failuresOnly, setFailuresOnly] = useState(false);
+  const [diag, setDiag] = useState<{ checkedAt: number; checks: DiagnosticCheck[] } | null>(null);
+  const [diagBusy, setDiagBusy] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [changelog, setChangelog] = useState<ChangelogEntry[] | null>(null);
@@ -68,10 +73,52 @@ export default function Settings() {
   // Separate from the capability check above — this is "is there an actual
   // newer release," which is what decides whether the button can be clicked
   // at all, not just whether self-update is wired up on this deploy.
-  useEffect(() => {
+  /** Ask GitHub now; a failure is shown (with its reason), never passed off as "up to date". */
+  function checkForUpdates() {
     setCheckingUpdate(true);
-    api.checkUpdate().then(setUpdateCheck).catch(() => {}).finally(() => setCheckingUpdate(false));
+    setCheckFailed(null);
+    api
+      .checkUpdate()
+      .then(setUpdateCheck)
+      .catch((e) => setCheckFailed(e instanceof Error ? e.message : "Couldn't check for updates."))
+      .finally(() => {
+        setCheckingUpdate(false);
+        loadActivity();
+      });
+  }
+  useEffect(() => {
+    checkForUpdates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Always the CURRENT filter (a refresh started by an earlier render must not overwrite a newer choice),
+  // and only the latest request's answer is used.
+  const failuresRef = useRef(false);
+  const activityReq = useRef(0);
+  function loadActivity() {
+    const mine = ++activityReq.current;
+    api
+      .activity(failuresRef.current)
+      .then((rows) => mine === activityReq.current && setActivityRows(rows))
+      .catch(() => mine === activityReq.current && setActivityRows([]));
+  }
+  useEffect(() => {
+    failuresRef.current = failuresOnly;
+    loadActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [failuresOnly]);
+
+  async function testConnections() {
+    setDiagBusy(true);
+    try {
+      setDiag(await api.diagnostics());
+    } catch (e) {
+      setDiag({ checkedAt: Date.now(), checks: [{ name: "Webdex server", ok: false, ms: 0, detail: e instanceof Error ? e.message : "No answer." }] });
+    } finally {
+      setDiagBusy(false);
+      loadActivity();
+    }
+  }
 
   const currentVersion = updateCheck?.currentVersion ?? null;
   const currentEntry =
@@ -424,18 +471,31 @@ export default function Settings() {
               {currentEntry?.date && ` · Updated ${currentEntry.date}`}
             </div>
           </div>
-          {!updateCapable ? (
-            <span className="settings-row-sub">Self-update not set up on this deploy</span>
-          ) : checkingUpdate ? (
-            <span className="settings-row-sub">Checking…</span>
-          ) : updateCheck?.updateAvailable ? (
-            <button className="btn btn-secondary" style={{ width: "auto" }} onClick={triggerUpdate} disabled={updating}>
-              {updating ? "Updating…" : `Update to v${updateCheck.latestVersion}`}
+          <div className="settings-update-actions">
+            <button className="btn btn-secondary" style={{ width: "auto" }} onClick={checkForUpdates} disabled={checkingUpdate || updating}>
+              {checkingUpdate ? "Checking…" : "Check for updates"}
             </button>
-          ) : (
-            <span className="settings-row-sub">Up to date</span>
-          )}
+            {updateCheck?.updateAvailable && updateCapable && (
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={triggerUpdate} disabled={updating}>
+                {updating ? "Updating…" : `Update to v${updateCheck.latestVersion}`}
+              </button>
+            )}
+          </div>
         </div>
+        {/* What the last check found — a failure is shown with its reason, not as "up to date". */}
+        {!checkingUpdate && (checkFailed || updateCheck?.error) && (
+          <div className="error" role="alert">
+            Couldn't check for updates: {checkFailed || updateCheck?.error}
+          </div>
+        )}
+        {!checkingUpdate && !checkFailed && updateCheck && !updateCheck.error && (
+          <p className="settings-help">
+            {updateCheck.updateAvailable
+              ? `v${updateCheck.latestVersion} is available${updateCapable ? "" : " — one-click update isn't set up here, so recreate the container from Portainer on the latest image."}`
+              : "Up to date."}
+            {updateCheck.checkedAt ? ` Checked ${new Date(updateCheck.checkedAt).toLocaleTimeString()}.` : ""}
+          </p>
+        )}
 
         {/* This build's own notes. */}
         {currentEntry?.body && (
@@ -476,6 +536,73 @@ export default function Settings() {
 
         {updateMessage && <p className="settings-help">{updateMessage}</p>}
         {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Connections</h2>
+        <p className="settings-help">
+          Tests Audiobookshelf, Codex (reachable, your account, read-along), GitHub and Docker right now, and says exactly what
+          failed and why.
+        </p>
+        <button className="btn btn-secondary" style={{ width: "auto" }} onClick={testConnections} disabled={diagBusy}>
+          {diagBusy ? "Testing…" : "Test connections"}
+        </button>
+        {diag && (
+          <ul className="settings-diag" aria-label="Connection results">
+            {diag.checks.map((c) => (
+              <li key={c.name} className={c.ok ? "ok" : "bad"}>
+                <span className="settings-diag-mark">{c.ok ? "✓" : "✕"}</span>
+                <span>
+                  <strong>{c.name}</strong>
+                  {c.ms > 0 && <span className="settings-diag-ms"> {c.ms} ms</span>}
+                  <br />
+                  <span className="settings-diag-detail">{c.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Activity</h2>
+        <p className="settings-help">
+          What happened when Webdex synced with Audiobookshelf and Codex, and checked for updates — including what failed and why.
+        </p>
+        <div className="settings-activity-bar">
+          <label className="settings-check">
+            <input type="checkbox" checked={failuresOnly} onChange={(e) => setFailuresOnly(e.target.checked)} /> Failures only
+          </label>
+          <button className="settings-link-btn" onClick={() => loadActivity()}>
+            Refresh
+          </button>
+          <button
+            className="settings-link-btn"
+            onClick={() => api.clearActivity().then(() => loadActivity()).catch(() => {})}
+            disabled={!activityRows?.length}
+          >
+            Clear
+          </button>
+        </div>
+        {activityRows === null ? (
+          <p className="settings-help">Loading…</p>
+        ) : activityRows.length === 0 ? (
+          <p className="settings-help">{failuresOnly ? "No failures recorded." : "Nothing yet — press Sync now or play something."}</p>
+        ) : (
+          <ul className="settings-activity" aria-label="Activity log">
+            {activityRows.map((r: ActivityEntry) => (
+              <li key={r.id} className={r.ok ? "ok" : "bad"}>
+                <span className="settings-diag-mark">{r.ok ? "✓" : "✕"}</span>
+                <span>
+                  <strong>{r.action}</strong> <span className="settings-activity-area">{r.area}</span>
+                  <br />
+                  <span className="settings-diag-detail">{r.message}</span>
+                </span>
+                <time className="settings-activity-time">{new Date(r.at).toLocaleString()}</time>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {reportAvailable && (

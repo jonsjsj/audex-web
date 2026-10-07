@@ -21,6 +21,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_identity
+from app.core import activity
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -86,6 +87,18 @@ async def update_available(identity=Depends(get_current_identity)):
 
 @router.get("/update/status")
 async def update_status(identity=Depends(get_current_identity)):
+    result = await _update_status_raw()
+    if result.get("state") in ("success", "failed"):
+        step = result.get("step") or ""
+        await activity.record(
+            identity.id, "update", "Update result", result["state"] == "success",
+            f"{'finished' if result['state'] == 'success' else 'failed at step: ' + step} (v{result.get('target') or '?'})",
+            dedupe_s=3600,
+        )
+    return result
+
+
+async def _update_status_raw():
     """The most recent self-update attempt's outcome, so the Settings page can
     show success/failure after the swap instead of guessing. `state` is one of
     idle | in_progress | success | failed; `step` names where a failure landed."""
@@ -135,27 +148,52 @@ async def update_check(identity=Depends(get_current_identity)):
     base = f"https://raw.githubusercontent.com/{settings.UPDATE_REPO}/main"
     latest = None
     changelog_entry = None
+    error = None  # why the check itself failed — shown instead of a misleading "up to date"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             vr = await client.get(f"{base}/VERSION")
-            latest = vr.text.strip() if vr.status_code == 200 else None
+            if vr.status_code == 200:
+                latest = vr.text.strip()
+            else:
+                error = f"GitHub answered {activity.describe_status(vr.status_code)} for {settings.UPDATE_REPO}/VERSION"
             if latest:
                 cr = await client.get(f"{base}/CHANGELOG.md")
                 if cr.status_code == 200:
                     changelog_entry = _changelog_entry_for(cr.text, latest)
-    except httpx.HTTPError:
-        pass
+    except httpx.HTTPError as e:
+        error = f"Couldn't reach GitHub: {activity.describe_error(e)}"
 
+    available = bool(latest) and _version_newer(latest, current)
+    await activity.record(
+        identity.id, "update", "Check for updates", error is None,
+        error or (f"v{latest} is available (running v{current})" if available else f"up to date (v{current})"),
+        dedupe_s=30,
+    )
     return {
         "currentVersion": current,
         "latestVersion": latest,
-        "updateAvailable": bool(latest) and _version_newer(latest, current),
+        "updateAvailable": available,
         "changelogEntry": changelog_entry,
+        "error": error,
+        "checkedAt": int(time.time() * 1000),
     }
 
 
 @router.post("/update")
 async def trigger_update(identity=Depends(get_current_identity)):
+    try:
+        res = await _do_update()
+    except HTTPException as e:
+        await activity.record(identity.id, "update", "Update", False, str(e.detail))
+        raise
+    except httpx.HTTPError as e:
+        await activity.record(identity.id, "update", "Update", False, activity.describe_error(e))
+        raise HTTPException(502, f"Update failed: {activity.describe_error(e)}")
+    await activity.record(identity.id, "update", "Update", True, "New image pulled; swapping the container now.")
+    return res
+
+
+async def _do_update():
     if not os.path.exists(settings.DOCKER_SOCK):
         raise HTTPException(400, "No Docker socket mounted — can't self-update from inside the container.")
 

@@ -108,6 +108,25 @@ export interface UpdateCheck {
   latestVersion: string | null;
   updateAvailable: boolean;
   changelogEntry: string | null;
+  /** Why the check itself failed (couldn't reach GitHub…); null when it worked. */
+  error?: string | null;
+  checkedAt?: number;
+}
+
+export interface ActivityEntry {
+  id: number;
+  at: number; // epoch ms
+  area: string;
+  action: string;
+  ok: boolean;
+  message: string;
+}
+
+export interface DiagnosticCheck {
+  name: string;
+  ok: boolean;
+  ms: number;
+  detail: string;
 }
 
 export interface BookGroup {
@@ -149,6 +168,7 @@ export interface LocalBookmark {
 export interface UserPrefs {
   playbackSpeed: number;
   readerFontSize: number;
+  readerAppearance?: import("../lib/readerAppearance").ReaderAppearance;
   /** Show Codex's checked metadata (fixed author/series/year/…) where Codex has one. */
   useCodexMeta?: boolean;
 }
@@ -320,6 +340,9 @@ export const api = {
 
   updateAvailable: () => request<{ available: boolean }>("/api/admin/update/available"),
   checkUpdate: () => request<UpdateCheck>("/api/admin/update/check"),
+  activity: (failuresOnly = false) => request<ActivityEntry[]>(`/api/activity?failures=${failuresOnly}`),
+  clearActivity: () => request<{ ok: true }>("/api/activity", { method: "DELETE" }),
+  diagnostics: () => request<{ checkedAt: number; checks: DiagnosticCheck[] }>("/api/diagnostics"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
   updateStatus: () =>
     request<{ state: string; step: string | null; target: string | null; at: number | null }>(
