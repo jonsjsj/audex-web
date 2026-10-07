@@ -13,6 +13,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import httpx
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import AbsConn, connections_for_library, list_connections, resolve, tag
@@ -97,6 +98,13 @@ def _book_detail_extra(item: dict) -> dict:
         "language": meta.get("language"),
         "isbn": meta.get("isbn"),
         "asin": meta.get("asin"),
+        # Structured forms of the same fields, for the edit form.
+        "authorList": [a["name"] for a in (meta.get("authors") or []) if a.get("name")],
+        "narratorList": [n for n in narrators if n],
+        "seriesList": [
+            {"name": s.get("name"), "sequence": s.get("sequence") or ""}
+            for s in (meta.get("series") or []) if s.get("name")
+        ],
     }
 
 
@@ -228,25 +236,53 @@ def _run_pairing(triples: list[tuple[AbsConn, dict, dict]]) -> None:
     pair_dual_format(entries)
 
 
+def _merge_pairs(triples: list[tuple[AbsConn, dict, dict]]) -> list[tuple[AbsConn, dict, dict]]:
+    """One card per WORK. An ebook-only item and its audio-only twin (see
+    catalog_match.py) collapse into the audio item's card: it keeps
+    `pairedItemId` (the ebook item, which Read opens) and takes the furthest
+    progress and latest activity of the two, so a book you've read part of
+    shows that in the library whichever edition you were in. A twin whose
+    partner isn't in this result (it lives in a library not being browsed) is
+    left as it is — hiding it would make the book vanish from the view."""
+    by_id = {b["id"]: b for _c, _i, b in triples}
+    hidden: set[str] = set()
+    for _c, _i, book in triples:
+        other = by_id.get(book["pairedItemId"]) if book["pairedItemId"] else None
+        if not other or book["numAudioFiles"] <= 0 or book["hasEbook"]:
+            continue
+        if other["numAudioFiles"] > 0 or not other["hasEbook"]:
+            continue
+        # `book` is the audio item, `other` its ebook twin.
+        book["ebookProgress"] = max(book["ebookProgress"], other["ebookProgress"])
+        book["progress"] = max(book["audioProgress"], book["ebookProgress"])
+        book["lastUpdate"] = max(book["lastUpdate"] or 0, other["lastUpdate"] or 0) or None
+        book["isFinished"] = book["isFinished"] or other["isFinished"]
+        book["addedAt"] = book["addedAt"] or other["addedAt"]
+        hidden.add(other["id"])
+    return [t for t in triples if t[2]["id"] not in hidden]
+
+
 async def _iter_books_paired(
-    identity: Identity, db: AsyncSession, library_sel: str
+    identity: Identity, db: AsyncSession, library_sel: str, merge: bool = True
 ) -> list[tuple[AbsConn, dict, dict]]:
     """_iter_books(), with pairedItemId resolved against the identity's FULL
     catalog — a book's other-format edition may live in a library the caller
     isn't currently browsing (see catalog_match.py). When library_sel is
     already "all" that's the same fetch, so no second round-trip; otherwise
     a broader "all libraries" scan finds the pair and its id is copied back
-    onto the (separately fetched) items actually being returned."""
+    onto the (separately fetched) items actually being returned. With `merge`
+    (the default) the two items of a pair come back as ONE book (_merge_pairs);
+    the read-along bulk-status needs the unmerged list."""
     triples = await _iter_books(identity, db, library_sel)
     if library_sel == "all":
         _run_pairing(triples)
-        return triples
-    all_triples = await _iter_books(identity, db, "all")
-    _run_pairing(all_triples)
-    paired_by_id = {b["id"]: b.get("pairedItemId") for _, _, b in all_triples}
-    for _, _, b in triples:
-        b["pairedItemId"] = paired_by_id.get(b["id"])
-    return triples
+    else:
+        all_triples = await _iter_books(identity, db, "all")
+        _run_pairing(all_triples)
+        paired_by_id = {b["id"]: b.get("pairedItemId") for _, _, b in all_triples}
+        for _, _, b in triples:
+            b["pairedItemId"] = paired_by_id.get(b["id"])
+    return _merge_pairs(triples) if merge else triples
 
 
 @router.get("/libraries")
@@ -328,7 +364,164 @@ async def get_item(
         _run_pairing([*others, (conn, item, summary)])
     except HTTPException:
         pass
+    await _share_twin_progress(identity, db, summary)
     return summary
+
+
+async def _share_twin_progress(identity: Identity, db: AsyncSession, summary: dict) -> None:
+    """One work, one progress: when this item has a twin in the other format,
+    fold the twin's saved progress into this item's summary — its audio
+    position if it's the audiobook, its ebook position if it's the ebook — so
+    the Player and Reader can carry you across, exactly as they do for a book
+    that has both files on one item. Best-effort: the page loads without it."""
+    twin_id = summary.get("pairedItemId")
+    if not twin_id:
+        return
+    try:
+        tconn, tabs = await resolve(identity, db, twin_id)
+        prog = await abs_client.get_progress(tconn.base_url, tconn.token, tabs) or {}
+    except (AbsError, HTTPException):
+        return
+    t_audio = float(prog.get("progress") or 0) if summary["numAudioFiles"] <= 0 else 0.0
+    t_ebook = float(prog.get("ebookProgress") or 0)
+    if summary["numAudioFiles"] <= 0 and t_audio > summary["audioProgress"]:
+        summary["audioProgress"] = t_audio
+        summary["audioTimeS"] = float(prog.get("currentTime") or 0)
+    if t_ebook > summary["ebookProgress"]:
+        summary["ebookProgress"] = t_ebook
+    summary["progress"] = max(summary["audioProgress"], summary["ebookProgress"])
+    summary["lastUpdate"] = max(summary["lastUpdate"] or 0, prog.get("lastUpdate") or 0) or None
+
+
+class SeriesIn(BaseModel):
+    name: str
+    sequence: str | None = None
+
+
+class MetadataBody(BaseModel):
+    """Only the fields present in the request are changed."""
+    title: str | None = None
+    subtitle: str | None = None
+    authors: list[str] | None = None
+    narrators: list[str] | None = None
+    series: list[SeriesIn] | None = None
+    asin: str | None = None
+    isbn: str | None = None
+    alsoPaired: bool = False  # apply the same change to the other edition too
+
+
+def _abs_metadata(body: MetadataBody, fields: set[str]) -> dict:
+    out: dict = {}
+    for key in ("title", "subtitle", "asin", "isbn"):
+        if key in fields:
+            out[key] = (getattr(body, key) or "").strip() or None
+    if "authors" in fields and body.authors is not None:
+        out["authors"] = [{"name": n.strip()} for n in body.authors if n.strip()]
+    if "narrators" in fields and body.narrators is not None:
+        out["narrators"] = [n.strip() for n in body.narrators if n.strip()]
+    if "series" in fields and body.series is not None:
+        out["series"] = [
+            {"name": x.name.strip(), "sequence": (x.sequence or "").strip() or None}
+            for x in body.series if x.name.strip()
+        ]
+    return out
+
+
+@router.patch("/items/{item_id}/metadata")
+async def update_item_metadata(
+    item_id: str,
+    body: MetadataBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a book's details IN Audiobookshelf (the source of truth — the Audex
+    and Codex apps then see the fix too), instead of working around bad
+    metadata locally. Title/author/series/ids that disagree between an ebook and
+    its audiobook are exactly what keeps them from showing up as one book."""
+    fields = set(body.model_fields_set) - {"alsoPaired"}
+    metadata = _abs_metadata(body, fields)
+    if not metadata:
+        raise HTTPException(400, "Nothing to change.")
+    targets = [item_id]
+    if body.alsoPaired:
+        try:
+            summary = await get_item(item_id, identity, db)
+            if summary.get("pairedItemId"):
+                targets.append(summary["pairedItemId"])
+        except HTTPException:
+            pass
+    for target in targets:
+        conn, abs_id = await resolve(identity, db, target)
+        try:
+            await abs_client.update_metadata(conn.base_url, conn.token, abs_id, metadata)
+        except AbsError as e:
+            raise HTTPException(502, str(e))
+    return {"ok": True, "updated": len(targets)}
+
+
+class LinkBody(BaseModel):
+    otherId: str
+
+
+async def _plain_detail(identity: Identity, db: AsyncSession, item_id: str) -> dict:
+    conn, abs_id = await resolve(identity, db, item_id)
+    try:
+        item = await abs_client.item_detail(conn.base_url, conn.token, abs_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    out = _book_summary(conn, item)
+    out.update(_book_detail_extra(item))
+    return out
+
+
+@router.post("/items/{item_id}/link")
+async def link_editions(
+    item_id: str,
+    body: LinkBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merge an ebook and an audiobook that Audiobookshelf holds as two separate
+    items — by making the OTHER item's details match this one's, in
+    Audiobookshelf. Audex, Codex and this app each decide "same book?" from the
+    same Audiobookshelf metadata (ASIN / ISBN first, then title + author), so
+    writing it there is what makes the merge hold in all three instead of only
+    here. Title, subtitle, authors and series are copied from this item to the
+    other; an ASIN / ISBN either side has is shared with the one missing it."""
+    if body.otherId == item_id:
+        raise HTTPException(400, "Pick a different book to merge with.")
+    mine = await _plain_detail(identity, db, item_id)
+    other = await _plain_detail(identity, db, body.otherId)
+    mine_audio, other_audio = mine["numAudioFiles"] > 0, other["numAudioFiles"] > 0
+    if mine_audio == other_audio or (mine_audio and mine["hasEbook"]) or (other_audio and other["hasEbook"]) \
+            or (not mine_audio and not mine["hasEbook"]) or (not other_audio and not other["hasEbook"]):
+        raise HTTPException(400, "Merging needs one audiobook and one ebook (each a single format).")
+    audio, ebook = (mine, other) if mine_audio else (other, mine)
+    asin = audio["asin"] or ebook["asin"]
+    isbn = ebook["isbn"] or audio["isbn"]
+    shared: dict = {}
+    if asin:
+        shared["asin"] = asin
+    if isbn:
+        shared["isbn"] = isbn
+    like_mine = {
+        "title": mine["title"],
+        "subtitle": mine["subtitle"],
+        "authors": [{"name": n} for n in mine["authorList"]],
+        "series": [{"name": x["name"], "sequence": x["sequence"] or None} for x in mine["seriesList"]],
+        **shared,
+    }
+    changes = [(body.otherId, like_mine)]
+    missing = {k: v for k, v in shared.items() if not mine.get(k)}
+    if missing:
+        changes.append((item_id, missing))
+    for target, metadata in changes:
+        conn, abs_id = await resolve(identity, db, target)
+        try:
+            await abs_client.update_metadata(conn.base_url, conn.token, abs_id, metadata)
+        except AbsError as e:
+            raise HTTPException(502, str(e))
+    return {"ok": True}
 
 
 @router.get("/series")

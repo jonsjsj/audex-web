@@ -65,6 +65,25 @@ class AbsServer(Base):
     created_at = Column(Float, default=time.time)
 
 
+class ReaderBookmark(Base):
+    """A reading bookmark for a book that has NO audiobook edition to hang it on.
+
+    Books with audio keep their bookmarks in Audiobookshelf itself, as a point in
+    the audio (`fraction × duration`), exactly the way the Audex app does — so
+    they're shared with it. An ebook-only book has no duration to express a
+    position in, and ABS bookmarks are time-based, so those live here instead:
+    per person, on this server only. `item_id` is the namespaced id used at the
+    API boundary (see app/api/connections.py)."""
+    __tablename__ = "reader_bookmarks"
+
+    id = Column(Integer, primary_key=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=False, index=True)
+    item_id = Column(String, nullable=False, index=True)
+    fraction = Column(Float, nullable=False)  # 0..1 through the whole book
+    title = Column(String, nullable=False, default="")
+    created_at = Column(Float, default=time.time)
+
+
 class WebSession(Base):
     """A server-side session row a signed, httpOnly cookie points at by id. Table name
     avoids colliding with SQLAlchemy's own `Session` symbol."""

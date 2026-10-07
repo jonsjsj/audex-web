@@ -81,6 +81,21 @@ export interface BookDetail extends Book {
   language: string | null;
   isbn: string | null;
   asin: string | null;
+  authorList: string[];
+  narratorList: string[];
+  seriesList: { name: string; sequence: string }[];
+}
+
+/** Fields of a book's details editable in Audiobookshelf; only those present are changed. */
+export interface MetadataEdit {
+  title?: string;
+  subtitle?: string;
+  authors?: string[];
+  narrators?: string[];
+  series?: { name: string; sequence?: string }[];
+  asin?: string;
+  isbn?: string;
+  alsoPaired?: boolean;
 }
 
 export interface UpdateCheck {
@@ -118,6 +133,14 @@ export interface Bookmark {
   createdAt: number | null;
 }
 
+/** A reading bookmark kept by audex-web itself (a book with no audiobook edition). */
+export interface LocalBookmark {
+  id: number;
+  fraction: number; // 0..1 through the whole book
+  title: string;
+  createdAt: number; // epoch ms
+}
+
 export interface UserPrefs {
   playbackSpeed: number;
   readerFontSize: number;
@@ -129,6 +152,8 @@ export interface ReadAlongStatus {
   state: string; // "none" | "queued" | "downloading" | "extracting" | "transcribing" | "aligning" | "done" | "error"
   progress: number; // 0..1
   etaSeconds: number | null;
+  /** Only when state === "error": what failed and what to do about it. */
+  error?: { stage: string | null; message: string | null; hint: string | null } | null;
 }
 
 export interface SyncMapEntry {
@@ -213,6 +238,13 @@ export const api = {
       `/api/library/items?libraryId=${encodeURIComponent(libraryId)}&search=${encodeURIComponent(search)}`,
     ),
   item: (itemId: string) => request<BookDetail>(`/api/library/items/${itemId}`),
+  updateMetadata: (itemId: string, body: MetadataEdit) =>
+    request<{ ok: true; updated: number }>(`/api/library/items/${itemId}/metadata`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  linkEditions: (itemId: string, otherId: string) =>
+    request<{ ok: true }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>
@@ -235,9 +267,17 @@ export const api = {
   removeBookmark: (itemId: string, timeS: number) =>
     request<{ ok: true }>(`/api/play/${itemId}/bookmarks/${Math.round(timeS)}`, { method: "DELETE" }),
 
+  // Reading bookmarks for books with NO audiobook edition (those with audio use
+  // the Audiobookshelf bookmark calls above, shared with the Audex app).
+  readerBookmarks: (itemId: string) => request<LocalBookmark[]>(`/api/read/${itemId}/bookmarks`),
+  addReaderBookmark: (itemId: string, body: { fraction: number; title: string }) =>
+    request<LocalBookmark>(`/api/read/${itemId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
+  removeReaderBookmark: (itemId: string, id: number) =>
+    request<{ ok: true }>(`/api/read/${itemId}/bookmarks/${id}`, { method: "DELETE" }),
+
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
-    request<{ locator: ReadiumLocator | null }>(`/api/read/${itemId}/position`),
+    request<{ locator: ReadiumLocator | null; progress?: number }>(`/api/read/${itemId}/position`),
   saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
   discardReadProgress: (itemId: string) =>

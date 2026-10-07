@@ -79,7 +79,7 @@ async def bulk_status(
     # same reasoning as above (serverKey == "" tags a primary item).
     ebook_to_audio: dict[str, str] = {}
     try:
-        for _conn, _item, book in await _iter_books_paired(identity, db, library_id):
+        for _conn, _item, book in await _iter_books_paired(identity, db, library_id, merge=False):
             if book["serverKey"] or not book["pairedItemId"]:
                 continue
             if book["hasEbook"] and book["numAudioFiles"] == 0:
@@ -133,13 +133,25 @@ async def status(
     if r.status_code != 200:
         raise HTTPException(502, "Read-along status check failed.")
     data = r.json()
-    return {
+    out = {
         "configured": data.get("configured", True),
         "available": data.get("available", False),
         "state": data.get("state", "none"),
         "progress": data.get("progress", 0.0),
         "etaSeconds": data.get("eta_seconds"),
     }
+    # Present only when state == "error" (docs/SYNC_API.md §3, "Descriptive
+    # failures"): which phase died, what happened, and `hint` — a plain-language
+    # next step written for whoever pressed "Align". Passing it through is what
+    # lets the UI say WHY an alignment failed instead of just "error".
+    err = data.get("error")
+    if isinstance(err, dict):
+        out["error"] = {
+            "stage": err.get("stage"),
+            "message": err.get("message"),
+            "hint": err.get("hint"),
+        }
+    return out
 
 
 class BuildBody(BaseModel):

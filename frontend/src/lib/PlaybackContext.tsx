@@ -275,7 +275,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (autoResumedRef.current || explicitJumpRef.current) return;
     if (!book || !session || !readAlong.map) return;
     autoResumedRef.current = true; // decide now, whichever way — never re-run
-    if (!book.hasEbook || book.ebookProgress <= book.audioProgress) return;
+    if (!(book.hasEbook || book.pairedItemId) || book.ebookProgress <= book.audioProgress) return;
     const mappedS = timeAtProgression(readAlong.map, book.ebookProgress);
     if (mappedS === null || mappedS - positionRef.current <= 20) return; // not meaningfully ahead
     seekTo(mappedS);

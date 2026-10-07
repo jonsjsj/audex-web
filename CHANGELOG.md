@@ -7,6 +7,90 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.6.0] - 2026-10-06
+
+### Fixed
+- **An ebook and its audiobook showed up as two separate cards.** Matching
+  compared only the *first-listed* author and a fuzzy whole-title score, so
+  "Deverell, Travis, Shirtaloon" vs "Shirtaloon, Travis Deverell" or a title with
+  an extra subtitle never matched — while near-misses like *Dune* / *Dune
+  Messiah* or *Monsters 12* / *13* could. Matching now compares every author's
+  name words, the title part by part (so a longer or shorter subtitle is fine),
+  the volume number, and the series position; a Kindle-vs-Audible ASIN mismatch
+  no longer blocks a pair. A matched pair is shown as **one book** everywhere
+  (library, series, authors, narrators), with both Listen and Read.
+- **Progress now carries across the two editions.** The book page, Player and
+  Reader see the other edition's saved position, so a book you've listened to
+  60% of opens in the Reader at ~60% (exactly, via the read-along map when one
+  exists, otherwise by percentage) instead of page one, and vice versa.
+- Browser tab title is now "Webdex".
+- **A+ / A- never changed the text size.** Readium's font-size setting is a
+  multiplier (1 = 100%, valid range 0.7–4), but the Reader handed it the
+  percentage (`100`, `112.5`, `175`…); Readium silently drops an out-of-range
+  value, so the buttons did nothing. The stored percentage is now converted.
+- **The page-turn arrows couldn't be clicked.** The book's frame was sized
+  wider than its container and spilled over the right-hand arrow, swallowing
+  the click. It's now contained.
+- **Reading progress only moved a chapter at a time.** The Reader's position
+  list has one entry per chapter, so a book with a few long chapters sat on
+  one percentage for hours — which is also all Audiobookshelf (and so Codex)
+  was ever told. Progress is now worked out from where you are *inside* the
+  chapter (the server sends each chapter's text length with the manifest), so
+  the percentage moves page by page and that finer number is what's saved as
+  `ebookProgress`.
+- **"Request alignment" never showed the result.** After pressing it the page
+  said "Building…" forever, because nothing checked on the job again — you only
+  saw it finish after a reload. It now watches the job through to the end.
+- **A failed alignment said nothing about why.** The alignment service reports
+  which phase failed, what happened and what to do about it; the server dropped
+  all of that. It's passed through and shown, with a Try again button.
+- **Opening a book now resumes at the right place when the saved position came
+  from another app.** The Audex app and Codex store their own location format,
+  which the web reader can't open — it used to start at page one even though
+  the saved percentage was, say, 50%. It now resumes at that percentage.
+
+### Added
+- **Edit details (on the book page).** Fix a book's title, subtitle, authors,
+  narrators, series, ASIN or ISBN and it's saved **to Audiobookshelf itself**, so
+  Audex and Codex see the correction too. A tick-box applies it to the other
+  edition as well; giving both editions the same ASIN/ISBN keeps them one book.
+- **Merge with another edition (book page).** When Audiobookshelf holds an
+  ebook and its audiobook as two items and the automatic matching can't tell,
+  pick the other one: its title, authors and series are set to match, and an
+  ASIN/ISBN either side has is shared — all **in Audiobookshelf**, so Audex,
+  Codex and Webdex (which each match from that same metadata) merge them too.
+- **Hide the side menu.** A button next to the Audex logo collapses the side
+  menu on every page (and a small ☰ brings it back); it remembers your choice.
+- **One page / two pages.** A switch in the Reader header chooses single-page
+  or two-page-spread layout (remembered per device).
+- **Keyboard paging:** ← → and PageUp / PageDown, plus **Space** (forward) and
+  **Shift+Space** (back). These work while focus is inside the book itself, not
+  just on the page around it.
+- **A bottom bar that appears when you mouse over the bottom of the Reader**
+  with a progress slider you can drag or click to jump anywhere in the book,
+  a **Chapters** list (current chapter highlighted) built from the book's table
+  of contents, **Bookmarks**, and **Read-along**.
+- **Bookmarks**, stored the way the Audex app stores them. A book with an
+  audiobook edition (its own, or a paired one) keeps them in Audiobookshelf as
+  a point in the audio — so they show up in the Audex app too, and the other
+  way round. A book with no audiobook has no audio to hang one on, so those are
+  kept by audex-web itself (on this server only; the panel says so). Add one
+  with the **＋ Bookmark** button or the **B** key; tick marks on the slider show
+  where they are. Jumping more than ~1.5% of the book with the slider, a chapter
+  or a bookmark also drops an automatic **"Left off"** marker at the place you
+  left (the newest five are kept), so an accidental jump never loses your spot.
+- **Read-along in the Reader.** A Read-along button shows whether the book is
+  aligned, and lets you **request alignment** with live progress (phase, percent,
+  time left) and — if it fails — what went wrong and what to try. Once aligned,
+  **"Follow the audiobook while it plays"** turns the page to keep up with the
+  narration; turning a page yourself pauses that for a few seconds, and it can be
+  switched off. (It follows by page — it doesn't highlight the sentence being
+  read yet.)
+- The chapter name in the Reader's header now comes from the book's table of
+  contents, so it stays correct after a jump; and the "resumed from your
+  listening progress" message is a brief overlay instead of a line that resized
+  the book when it appeared.
+
 ## [0.5.3] - 2026-10-06
 
 ### Added
