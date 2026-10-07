@@ -22,7 +22,7 @@ const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(B
  *  title/author/series/ASIN/ISBN is what stops an ebook and its audiobook from
  *  showing up as one book, and the fix belongs in the library (so the Audex and
  *  Codex apps benefit too), not in a local workaround. */
-function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSaved: () => void; onCancel: () => void }) {
+function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSaved: (note?: string) => void; onCancel: () => void }) {
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle ?? "");
   const [authors, setAuthors] = useState(book.authorList.join(", "));
@@ -40,7 +40,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
     setBusy(true);
     setErr(null);
     try {
-      await api.updateMetadata(book.id, {
+      const res = await api.updateMetadata(book.id, {
         title,
         subtitle,
         authors: splitList(authors),
@@ -50,7 +50,15 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
         isbn,
         alsoPaired,
       });
-      onSaved();
+      // Codex is the source of truth for these details. If this fix didn't reach it, Codex's older value would
+      // keep being shown — say so, with the one thing that fixes it.
+      onSaved(
+        res.codexSync === "not-linked"
+          ? "Saved to Audiobookshelf. Link your Codex account in Settings so this fix reaches Codex too — until then Codex's older value is still shown."
+          : res.codexSync === "failed"
+            ? "Saved to Audiobookshelf, but Codex didn't accept the change — Codex's older value may still be shown."
+            : undefined,
+      );
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't save.");
       setBusy(false);
@@ -60,7 +68,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
   return (
     <form className="book-detail-section book-edit" onSubmit={save}>
       <div className="l">EDIT DETAILS</div>
-      <p className="sub">Saved to Audiobookshelf, so Audex and Codex pick it up too.</p>
+      <p className="sub">Saved to Audiobookshelf and Codex, so Audex and Codex pick it up too.</p>
       <label htmlFor="ed-title">Title</label>
       <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
       <label htmlFor="ed-sub">Subtitle</label>
@@ -185,6 +193,7 @@ export default function BookDetail() {
   const [editing, setEditing] = useState(false);
   const [merging, setMerging] = useState(false);
   const [reload, setReload] = useState(0);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!itemId) return;
@@ -326,12 +335,14 @@ export default function BookDetail() {
         <EditDetails
           book={book}
           onCancel={() => setEditing(false)}
-          onSaved={() => {
+          onSaved={(note) => {
             setEditing(false);
+            setSaveNote(note ?? null);
             setReload((n) => n + 1);
           }}
         />
       )}
+      {saveNote && <div className="error" role="status">{saveNote}</div>}
 
       {book.description && (
         <div className="book-detail-section">

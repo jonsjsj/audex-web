@@ -41,6 +41,13 @@ in Codex (Settings → API Keys) and paste it in. This is per-person, not per-se
 same as the mobile app's own Settings → Codex sync — a single shared token would
 attribute everyone's progress to whichever one Codex account it belongs to.
 
+### Codex's checked metadata
+
+When `CODEX_URL` is set and your Codex serves `/audex/meta` (Codex ≥ the release that added it), the library shows
+the author, narrator, series, year and description you've fixed in Codex instead of Audiobookshelf's raw values;
+Settings → Codex sync has a per-person switch. Editing a book here also sends the fix to Codex (needs your linked
+Codex API key). Details and the exact rule: `docs/SYNC_API.md`.
+
 ## Development
 
 ```bash

@@ -7,6 +7,22 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [Unreleased]
+
+### Added
+- **Codex's checked metadata.** Audiobookshelf's metadata is often wrong and gets fixed in Codex. With
+  `CODEX_URL` set, the library, series, authors, narrators, search, detail page and now-playing data use
+  Codex's author / narrator / series + position / year / description whenever Codex has one (else
+  Audiobookshelf's) — so a book Codex moved into a series groups and sorts there. Fetched in batches of 200 via
+  Codex's `/audex/meta`, cached for 5 minutes, and any Codex problem (down, slow, older version) silently falls
+  back to Audiobookshelf. A hand-picked Codex cover replaces the cover; enriched covers don't.
+- **Settings → Codex sync → "Use Codex's metadata"** (per person, on by default).
+- **A fix made here reaches Codex too.** Editing a book's title / authors / narrators / series now also sends the
+  change to Codex with the person's own linked API key, so Codex (the source of truth) records it and its
+  periodic Audiobookshelf correction doesn't undo it. If Codex isn't linked the page says so.
+- Docs: `docs/SYNC_API.md` documents `/audex/meta` and the client rule (kept identical across the three repos).
+- Tests: `backend/tests` (`python -m unittest discover -s tests`).
+
 ## [0.6.0] - 2026-10-06
 
 ### Fixed

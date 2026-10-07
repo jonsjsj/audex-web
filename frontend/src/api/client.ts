@@ -144,6 +144,8 @@ export interface LocalBookmark {
 export interface UserPrefs {
   playbackSpeed: number;
   readerFontSize: number;
+  /** Show Codex's checked metadata (fixed author/series/year/…) where Codex has one. */
+  useCodexMeta?: boolean;
 }
 
 export interface ReadAlongStatus {
@@ -239,7 +241,7 @@ export const api = {
     ),
   item: (itemId: string) => request<BookDetail>(`/api/library/items/${itemId}`),
   updateMetadata: (itemId: string, body: MetadataEdit) =>
-    request<{ ok: true; updated: number }>(`/api/library/items/${itemId}/metadata`, {
+    request<{ ok: true; updated: number; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/metadata`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
