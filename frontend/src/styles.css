@@ -1482,13 +1482,56 @@ input:focus {
   height: 100vh;
   outline: none; /* focusable for arrow-key paging, but no focus ring on the page shell itself */
 }
+/* The title bar folds away like the bottom controls: a slim strip stays at the top and the bar slides
+   over the book when the mouse is over it (or focus is inside it, a list is open, or the strip is tapped). */
+.reader-top {
+  position: relative;
+  flex: none;
+  height: 1rem;
+  z-index: 5;
+}
+.reader-top-handle {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+}
+.reader-top-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0.3rem;
+  width: 2.5rem;
+  height: 3px;
+  margin-left: -1.25rem;
+  border-radius: 2px;
+  background: var(--line);
+}
+.reader-top:hover .reader-top-handle::after,
+.reader-top.open .reader-top-handle::after {
+  opacity: 0;
+}
 .reader-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 0.7rem 1rem;
+  background: var(--paper);
   border-bottom: 1px solid var(--line);
-  flex: none;
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.reader-top:hover .reader-head,
+.reader-top:focus-within .reader-head,
+.reader-top.open .reader-head {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 .reader-back {
   background: none;

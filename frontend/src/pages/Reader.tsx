@@ -198,6 +198,13 @@ export default function Reader() {
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
   const [toc, setToc] = useState<TocItem[]>([]);
+  const [topPinned, setTopPinned] = useState(false); // the top bar was tapped open (no hover on a phone)
+  // A tapped-open top bar folds itself away again after a few seconds (a phone has no hover to leave).
+  useEffect(() => {
+    if (!topPinned) return;
+    const t = window.setTimeout(() => setTopPinned(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [topPinned]);
   const [panel, setPanel] = useState<"chapters" | "bookmarks" | "readalong" | "appearance" | null>(null);
   const [follow, setFollow] = useState(loadFollow);
   const [store, setStore] = useState<BookmarkStore | null>(null);
@@ -874,6 +881,10 @@ export default function Reader() {
 
   return (
     <div className="reader-wrap" tabIndex={-1}>
+      {/* Top bar: folds away like the bottom controls — a thin strip stays, the title bar appears when the
+          mouse is over it (or focus is inside it, a list is open, or the strip was tapped). */}
+      <div className={`reader-top ${topPinned ? "open" : ""}`}>
+      <div className="reader-top-handle" aria-hidden onClick={() => setTopPinned((v) => !v)} />
       <header className="reader-head">
         <button className="reader-back" onClick={() => navigate("/")}>
           ← Library
@@ -955,6 +966,7 @@ export default function Reader() {
           </button>
         </div>
       </header>
+      </div>
 
       {loading && <p className="sub" style={{ padding: "2rem" }}>Loading…</p>}
 

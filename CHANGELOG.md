@@ -7,6 +7,14 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.5] - 2026-10-07
+
+### Changed
+- **The reader's title bar folds away like the bottom controls.** Only a slim strip stays at the top of the book;
+  the title bar (Library, title and chapter, text size, page layout, full screen) slides in when the mouse is over
+  the strip or keyboard focus is in it, and folds back when you move off. On a phone, tap the strip to open it —
+  it closes by itself after a few seconds. The book now gets the whole height back.
+
 ## [0.7.4] - 2026-10-07
 
 ### Fixed
