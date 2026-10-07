@@ -54,6 +54,11 @@ here whenever there's something worth shipping.
   narrators, series, ASIN or ISBN and it's saved **to Audiobookshelf itself**, so
   Audex and Codex see the correction too. A tick-box applies it to the other
   edition as well; giving both editions the same ASIN/ISBN keeps them one book.
+- **Merge with another edition (book page).** When Audiobookshelf holds an
+  ebook and its audiobook as two items and the automatic matching can't tell,
+  pick the other one: its title, authors and series are set to match, and an
+  ASIN/ISBN either side has is shared — all **in Audiobookshelf**, so Audex,
+  Codex and Webdex (which each match from that same metadata) merge them too.
 - **Hide the side menu.** A button next to the Audex logo collapses the side
   menu on every page (and a small ☰ brings it back); it remembers your choice.
 - **One page / two pages.** A switch in the Reader header chooses single-page

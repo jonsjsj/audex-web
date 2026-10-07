@@ -459,6 +459,71 @@ async def update_item_metadata(
     return {"ok": True, "updated": len(targets)}
 
 
+class LinkBody(BaseModel):
+    otherId: str
+
+
+async def _plain_detail(identity: Identity, db: AsyncSession, item_id: str) -> dict:
+    conn, abs_id = await resolve(identity, db, item_id)
+    try:
+        item = await abs_client.item_detail(conn.base_url, conn.token, abs_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    out = _book_summary(conn, item)
+    out.update(_book_detail_extra(item))
+    return out
+
+
+@router.post("/items/{item_id}/link")
+async def link_editions(
+    item_id: str,
+    body: LinkBody,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merge an ebook and an audiobook that Audiobookshelf holds as two separate
+    items — by making the OTHER item's details match this one's, in
+    Audiobookshelf. Audex, Codex and this app each decide "same book?" from the
+    same Audiobookshelf metadata (ASIN / ISBN first, then title + author), so
+    writing it there is what makes the merge hold in all three instead of only
+    here. Title, subtitle, authors and series are copied from this item to the
+    other; an ASIN / ISBN either side has is shared with the one missing it."""
+    if body.otherId == item_id:
+        raise HTTPException(400, "Pick a different book to merge with.")
+    mine = await _plain_detail(identity, db, item_id)
+    other = await _plain_detail(identity, db, body.otherId)
+    mine_audio, other_audio = mine["numAudioFiles"] > 0, other["numAudioFiles"] > 0
+    if mine_audio == other_audio or (mine_audio and mine["hasEbook"]) or (other_audio and other["hasEbook"]) \
+            or (not mine_audio and not mine["hasEbook"]) or (not other_audio and not other["hasEbook"]):
+        raise HTTPException(400, "Merging needs one audiobook and one ebook (each a single format).")
+    audio, ebook = (mine, other) if mine_audio else (other, mine)
+    asin = audio["asin"] or ebook["asin"]
+    isbn = ebook["isbn"] or audio["isbn"]
+    shared: dict = {}
+    if asin:
+        shared["asin"] = asin
+    if isbn:
+        shared["isbn"] = isbn
+    like_mine = {
+        "title": mine["title"],
+        "subtitle": mine["subtitle"],
+        "authors": [{"name": n} for n in mine["authorList"]],
+        "series": [{"name": x["name"], "sequence": x["sequence"] or None} for x in mine["seriesList"]],
+        **shared,
+    }
+    changes = [(body.otherId, like_mine)]
+    missing = {k: v for k, v in shared.items() if not mine.get(k)}
+    if missing:
+        changes.append((item_id, missing))
+    for target, metadata in changes:
+        conn, abs_id = await resolve(identity, db, target)
+        try:
+            await abs_client.update_metadata(conn.base_url, conn.token, abs_id, metadata)
+        except AbsError as e:
+            raise HTTPException(502, str(e))
+    return {"ok": True}
+
+
 @router.get("/series")
 async def get_series(
     library_id: str = Query(..., alias="libraryId"),
