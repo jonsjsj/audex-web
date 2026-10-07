@@ -37,7 +37,21 @@ async def get_settings(identity: Identity = Depends(get_current_identity), db: A
 
 # Reader appearance — docs/READER_APPEARANCE.md. Validated here so a bad client can't store junk.
 _THEMES = {"auto", "light", "dark", "sepia", "custom"}
-_FONTS = {"publisher", "serif", "sans", "mono"}
+_FONTS = {"publisher", "serif", "sans", "mono", "georgia", "palatino", "times", "arial", "verdana", "courier", "custom"}
+_FONT_NAME = re.compile(r"^[A-Za-z0-9 _'-]{1,60}$")
+# Spacing ranges — identical in the Audex app (docs/READER_APPEARANCE.md); null = the book's own.
+_SPACING = {"lineSpacing": (1.0, 2.5), "paragraphSpacing": (0.0, 2.0), "letterSpacing": (0.0, 0.5), "wordSpacing": (0.0, 1.0)}
+
+
+def _spacing(raw: dict, key: str):
+    v = raw.get(key)
+    if v is None or v == "":
+        return None
+    try:
+        lo, hi = _SPACING[key]
+        return round(max(lo, min(hi, float(v))), 3)
+    except (TypeError, ValueError):
+        return None
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 FONT_MIN_PT, FONT_MAX_PT, NORMAL_PT = 9, 48, 12
 
@@ -57,6 +71,8 @@ def clean_appearance(raw: dict | None, fallback_percent: float = 100.0) -> dict:
         "fontSizePt": round(max(FONT_MIN_PT, min(FONT_MAX_PT, size))),
         "theme": raw.get("theme") if raw.get("theme") in _THEMES else "auto",
         "font": raw.get("font") if raw.get("font") in _FONTS else "publisher",
+        "fontName": raw["fontName"].strip() if isinstance(raw.get("fontName"), str) and _FONT_NAME.match(raw["fontName"].strip()) else "",
+        **{k: _spacing(raw, k) for k in _SPACING},
         "textColor": raw["textColor"] if isinstance(raw.get("textColor"), str) and _HEX.match(raw["textColor"]) else "#1a1a1a",
         "backgroundColor": raw["backgroundColor"] if isinstance(raw.get("backgroundColor"), str) and _HEX.match(raw["backgroundColor"]) else "#ffffff",
     }

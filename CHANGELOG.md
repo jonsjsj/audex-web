@@ -7,6 +7,16 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.2] - 2026-10-07
+
+### Added
+- **Font type.** The Reader's Appearance panel now has a font list — the book's own, Serif, Sans-serif,
+  Monospace, Georgia, Palatino, Times New Roman, Arial, Verdana, Courier New — and **Other…** to type any font
+  installed on your device.
+- **Text spacing.** Line, paragraph, letter and word spacing sliders, each with a Reset back to *the book's
+  own* (nothing is overridden until you move one). Saved per person like the rest of the appearance.
+- Both are in the Audex app too, with the same names and ranges (`docs/READER_APPEARANCE.md`).
+
 ## [0.7.1] - 2026-10-07
 
 ### Fixed
