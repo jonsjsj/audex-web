@@ -129,6 +129,13 @@ async def fetch_meta(codex_url: str, ids: list[str]) -> dict[str, dict]:
     return {i: _meta_cache[i][1] for i in wanted if i in _meta_cache and _meta_cache[i][1]}
 
 
+def forget_all_meta() -> None:
+    """Drop every cached answer, so the next page load re-reads Codex's checked metadata (Sync now)."""
+    _meta_cache.clear()
+    _config_cache.clear()
+    _down_until.clear()
+
+
 def forget_meta(item_id: str) -> None:
     """Drop one item's cached answer (after an edit) so the next read sees the change."""
     _meta_cache.pop(item_id, None)
@@ -141,6 +148,10 @@ def codex_fields_from_abs_metadata(metadata: dict) -> dict:
         out["title"] = metadata["title"] or ""
     if "authors" in metadata:
         out["author"] = ", ".join(a.get("name", "") for a in metadata["authors"] if a.get("name"))
+    if "publisher" in metadata:
+        out["studio"] = metadata["publisher"] or ""
+    if "publishedYear" in metadata:
+        out["year"] = metadata["publishedYear"] or ""
     if "narrators" in metadata:
         out["narrator"] = ", ".join(n for n in metadata["narrators"] if n)
     if "series" in metadata:
@@ -168,3 +179,21 @@ async def push_edit(codex_url: str, token: str, codex_id: int, fields: dict) -> 
         return r.status_code == 200
     except httpx.HTTPError:
         return False
+
+
+async def trigger_abs_sync(codex_url: str, token: str) -> tuple[bool, str]:
+    """POST /api/sync/abs/now — Codex's per-user "sync my Audiobookshelf now",
+    the same button as Codex's own Settings → Sync. Without it Codex only picks
+    up Webdex's reading progress on its own ~5 minute schedule. Returns
+    (ok, short human detail)."""
+    url = f"{codex_url.rstrip('/')}/api/sync/abs/now"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(url, headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        return False, "Couldn't reach Codex."
+    if r.status_code in (401, 403):
+        return False, "Codex didn't accept your token — relink it in Settings."
+    if r.status_code != 200:
+        return False, f"Codex answered {r.status_code}."
+    return True, "Codex is syncing."

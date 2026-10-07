@@ -6,7 +6,7 @@ import PersonDetail from "../components/PersonDetail";
 
 export default function NarratorDetail() {
   const { name } = useParams<{ name: string }>();
-  const { libraryId } = useShell();
+  const { libraryId, syncSignal } = useShell();
   const [group, setGroup] = useState<BookGroup | null | undefined>(undefined); // undefined = loading
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +17,7 @@ export default function NarratorDetail() {
       .narrators(libraryId)
       .then((groups) => setGroup(groups.find((g) => g.name === decodeURIComponent(name)) ?? null))
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this narrator."));
-  }, [libraryId, name]);
+  }, [libraryId, name, syncSignal]);
 
   if (error) return <div className="error" style={{ margin: "1.5rem" }}>{error}</div>;
   if (group === undefined) return <p className="sub" style={{ padding: "1.5rem" }}>Loading…</p>;

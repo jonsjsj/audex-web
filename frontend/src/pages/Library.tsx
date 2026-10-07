@@ -93,7 +93,7 @@ function sortBooks(books: Book[], key: SortKey): Book[] {
 
 export default function Library() {
   const navigate = useNavigate();
-  const { libraryId, error: shellError, search, resetSignal } = useShell();
+  const { libraryId, error: shellError, search, resetSignal, syncSignal } = useShell();
   const [books, setBooks] = useState<Book[] | null>(null);
   const [sort, setSort] = useState<SortKey>("title");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -118,7 +118,7 @@ export default function Library() {
         .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this library."));
     }, search ? 250 : 0); // debounce typing, but load the initial list instantly
     return () => clearTimeout(handle);
-  }, [libraryId, search]);
+  }, [libraryId, search, syncSignal]);
 
   // Read-along availability for the whole library in one call — powers the
   // grid cards' third icon. Best-effort: a failed/slow fetch just leaves
@@ -126,7 +126,7 @@ export default function Library() {
   useEffect(() => {
     if (!libraryId) return;
     api.readAlongBulkStatus(libraryId).then(setAlignMap).catch(() => {});
-  }, [libraryId]);
+  }, [libraryId, syncSignal]);
 
   // Fire-and-forget: no optimistic flip to "available" (it isn't yet — this
   // only starts the build), and no per-card loading state to keep simple —

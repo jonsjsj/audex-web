@@ -136,6 +136,21 @@ class EditTranslation(unittest.TestCase):
         self.assertEqual(cc.codex_fields_from_abs_metadata({"asin": "x", "isbn": "y"}), {})
         self.assertEqual(cc.codex_fields_from_abs_metadata({"series": []}), {"series_name": "", "series_position": ""})
 
+    def test_publisher_and_year_reach_codex(self):
+        self.assertEqual(cc.codex_fields_from_abs_metadata({"publisher": "P", "publishedYear": "2020"}),
+                         {"studio": "P", "year": "2020"})
+        # what Codex doesn't track stays Audiobookshelf-only
+        self.assertEqual(cc.codex_fields_from_abs_metadata({"description": "d", "genres": ["g"], "language": "en"}), {})
+
+
+class SyncNowClearsCache(unittest.TestCase):
+    def test_forget_all_meta_empties_every_cache(self):
+        cc._meta_cache["a"] = (0.0, {"x": 1})
+        cc._config_cache["http://codex"] = (0.0, True)
+        cc._down_until["http://codex"] = 9e12
+        cc.forget_all_meta()
+        self.assertFalse(cc._meta_cache or cc._config_cache or cc._down_until)
+
 
 if __name__ == "__main__":
     unittest.main()

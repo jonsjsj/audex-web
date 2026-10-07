@@ -15,6 +15,15 @@ function formatDuration(s: number | null): string | null {
  *  actual navigation (not just labels) — see docs/AUDEX_NAVIGATION.md's
  *  "clickable author/series/title" principle. Reached from a library-grid
  *  card; Play/Read are the actions FROM here, not skipped past it. */
+/** One wording for "did this change also reach Codex?" — used by Edit details and Merge alike. */
+function codexNote(state?: string): string | undefined {
+  if (state === "not-linked")
+    return "Saved to Audiobookshelf. Link your Codex account in Settings so this fix reaches Codex too — until then Codex's older value is still shown.";
+  if (state === "failed")
+    return "Saved to Audiobookshelf, but Codex didn't accept the change — Codex's older value may still be shown.";
+  return undefined;
+}
+
 /** Comma/newline separated text <-> list, for the multi-value fields. */
 const splitList = (v: string) => v.split(/[,\n;]/).map((x) => x.trim()).filter(Boolean);
 
@@ -31,6 +40,11 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
   const [sequence, setSequence] = useState(book.seriesList[0]?.sequence ?? "");
   const [asin, setAsin] = useState(book.asin ?? "");
   const [isbn, setIsbn] = useState(book.isbn ?? "");
+  const [description, setDescription] = useState(book.description ?? "");
+  const [publisher, setPublisher] = useState(book.publisher ?? "");
+  const [year, setYear] = useState(book.publishedYear ?? "");
+  const [language, setLanguage] = useState(book.language ?? "");
+  const [genres, setGenres] = useState(book.genres.join(", "));
   const [alsoPaired, setAlsoPaired] = useState(!!book.pairedItemId);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -48,17 +62,16 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
         series: series.trim() ? [{ name: series, sequence }] : [],
         asin,
         isbn,
+        description,
+        publisher,
+        publishedYear: year,
+        language,
+        genres: splitList(genres),
         alsoPaired,
       });
       // Codex is the source of truth for these details. If this fix didn't reach it, Codex's older value would
       // keep being shown — say so, with the one thing that fixes it.
-      onSaved(
-        res.codexSync === "not-linked"
-          ? "Saved to Audiobookshelf. Link your Codex account in Settings so this fix reaches Codex too — until then Codex's older value is still shown."
-          : res.codexSync === "failed"
-            ? "Saved to Audiobookshelf, but Codex didn't accept the change — Codex's older value may still be shown."
-            : undefined,
-      );
+      onSaved(codexNote(res.codexSync));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't save.");
       setBusy(false);
@@ -97,6 +110,24 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
           <input id="ed-isbn" value={isbn} onChange={(e) => setIsbn(e.target.value)} />
         </div>
       </div>
+      <div className="book-edit-row">
+        <div style={{ flex: 2 }}>
+          <label htmlFor="ed-pub">Publisher</label>
+          <input id="ed-pub" value={publisher} onChange={(e) => setPublisher(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-year">Year</label>
+          <input id="ed-year" value={year} onChange={(e) => setYear(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label htmlFor="ed-lang">Language</label>
+          <input id="ed-lang" value={language} onChange={(e) => setLanguage(e.target.value)} />
+        </div>
+      </div>
+      <label htmlFor="ed-genres">Genres (comma separated)</label>
+      <input id="ed-genres" value={genres} onChange={(e) => setGenres(e.target.value)} />
+      <label htmlFor="ed-desc">Description</label>
+      <textarea id="ed-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
       <p className="sub">Giving the ebook and the audiobook the same ASIN or ISBN is the surest way to keep them one book.</p>
       {book.pairedItemId && (
         <label className="book-edit-check">
@@ -121,7 +152,7 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
  *  two items and the automatic matching missed them. The change is written to
  *  Audiobookshelf (the other item is made to match this one), so Audex and Codex
  *  merge them too — see the backend's link_editions. */
-function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone: () => void; onCancel: () => void }) {
+function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone: (note?: string) => void; onCancel: () => void }) {
   const wantAudio = book.numAudioFiles <= 0; // this is the ebook → look for its audiobook, and vice versa
   const [q, setQ] = useState(book.title.split(":")[0]);
   const [results, setResults] = useState<Book[]>([]);
@@ -149,8 +180,8 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
     setBusy(true);
     setErr(null);
     try {
-      await api.linkEditions(book.id, b.id);
-      onDone();
+      const res = await api.linkEditions(book.id, b.id);
+      onDone(codexNote(res.codexSync));
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Couldn't merge.");
       setBusy(false);
@@ -186,7 +217,7 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
 export default function BookDetail() {
   const { itemId } = useParams<{ itemId: string }>();
   const navigate = useNavigate();
-  const { libraryId } = useShell();
+  const { libraryId, syncSignal } = useShell();
   const [book, setBook] = useState<BookDetailModel | null>(null);
   const [nextInSeries, setNextInSeries] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -201,7 +232,7 @@ export default function BookDetail() {
       .item(itemId)
       .then(setBook)
       .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load this book."));
-  }, [itemId, reload]);
+  }, [itemId, reload, syncSignal]);
 
   // "Next: #N Title" — mirrors the mobile app's WorkDetailScreen. Reuses the
   // same grouped-series endpoint Series/SeriesDetail already fetch, rather
@@ -324,8 +355,9 @@ export default function BookDetail() {
         <MergePicker
           book={book}
           onCancel={() => setMerging(false)}
-          onDone={() => {
+          onDone={(note) => {
             setMerging(false);
+            setSaveNote(note ?? null);
             setReload((n) => n + 1);
           }}
         />

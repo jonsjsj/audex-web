@@ -95,6 +95,11 @@ export interface MetadataEdit {
   series?: { name: string; sequence?: string }[];
   asin?: string;
   isbn?: string;
+  description?: string;
+  publisher?: string;
+  publishedYear?: string;
+  language?: string;
+  genres?: string[];
   alsoPaired?: boolean;
 }
 
@@ -187,6 +192,11 @@ export type ReadiumManifest = Record<string, unknown>;
 // .serialize() — see @readium/shared's own Locator.ts for the real shape.
 export type ReadiumLocator = Record<string, unknown>;
 
+export interface SyncResult {
+  audiobookshelf: { name: string; ok: boolean; rescan: "started" | "not-allowed" | "no"; error: string | null }[];
+  codex: { state: "started" | "failed" | "not-linked" | "not-configured"; detail: string };
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -232,6 +242,7 @@ export const api = {
     }),
   removeAbsServer: (key: string) =>
     request<{ ok: true }>(`/api/auth/abs/servers/${encodeURIComponent(key)}`, { method: "DELETE" }),
+  syncNow: () => request<SyncResult>("/api/sync", { method: "POST" }),
   logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
 
   libraries: () => request<Library[]>("/api/library/libraries"),
@@ -246,7 +257,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   linkEditions: (itemId: string, otherId: string) =>
-    request<{ ok: true }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
+    request<{ ok: true; codexSync?: "ok" | "off" | "not-linked" | "not-in-codex" | "failed" }>(`/api/library/items/${itemId}/link`, { method: "POST", body: JSON.stringify({ otherId }) }),
   series: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/series?libraryId=${encodeURIComponent(libraryId)}`),
   authors: (libraryId: string) =>
