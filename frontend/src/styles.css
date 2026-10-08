@@ -1176,7 +1176,7 @@ input:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2rem;
+  gap: 1.2rem;
   margin: 1.5rem 0;
 }
 .player-play {
@@ -1202,6 +1202,10 @@ input:focus {
   cursor: pointer;
   padding: 0.5rem;
   border-radius: 999px;
+}
+.player-chapter-skip:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .player-skip-n {
   font-family: var(--mono);

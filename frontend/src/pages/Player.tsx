@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { usePlayback, formatTime } from "../lib/PlaybackContext";
 import { madeAt, parseTitle } from "../lib/bookmarkTitle";
+import { chapterIndexAt, labelChapters } from "../lib/chapters";
 import { timeAtProgression } from "../lib/syncMap";
 
 const SKIP_S = 30;
@@ -168,6 +169,7 @@ export default function Player() {
   const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, readAlong } = playback;
   const shown = scrubbing ?? positionS;
   const currentChapter = session!.chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
+  const chapterLabels = labelChapters(session!.chapters.map((c) => c.title));
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
   const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
   const readingAheadS = (book!.hasEbook || book!.pairedItemId) && readAlong.map ? timeAtProgression(readAlong.map, book!.ebookProgress) : null;
@@ -218,7 +220,7 @@ export default function Player() {
       {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
 
       <div className="player-progress-section">
-        <p className="player-current-chapter">{currentChapter?.title ?? ""}</p>
+        <p className="player-current-chapter">{playback.chapterLabel ?? ""}</p>
 
         <div className="player-scrub">
           <div className="player-scrub-track">
@@ -275,6 +277,15 @@ export default function Player() {
       </div>
 
       <div className="player-transport">
+        <button
+          className="player-skip player-chapter-skip"
+          onClick={() => playback.skipChapter(-1)}
+          disabled={session!.chapters.length === 0}
+          aria-label="Previous chapter"
+          title="Previous chapter"
+        >
+          ⏮<span className="player-skip-n">CH</span>
+        </button>
         <button className="player-skip" onClick={() => playback.skip(-SKIP_S)} aria-label={`Back ${SKIP_S}s`}>
           ⟲<span className="player-skip-n">{SKIP_S}</span>
         </button>
@@ -283,6 +294,15 @@ export default function Player() {
         </button>
         <button className="player-skip" onClick={() => playback.skip(SKIP_S)} aria-label={`Forward ${SKIP_S}s`}>
           <span className="player-skip-n">{SKIP_S}</span>⟳
+        </button>
+        <button
+          className="player-skip player-chapter-skip"
+          onClick={() => playback.skipChapter(1)}
+          disabled={session!.chapters.length === 0 || chapterIndexAt(session!.chapters, shown) >= session!.chapters.length - 1}
+          aria-label="Next chapter"
+          title="Next chapter"
+        >
+          ⏭<span className="player-skip-n">CH</span>
         </button>
       </div>
 
@@ -345,15 +365,15 @@ export default function Player() {
       {activeTab === "chapters" ? (
         session!.chapters.length > 0 ? (
           <div className="player-tab-list">
-            {session!.chapters.map((c) => (
+            {session!.chapters.map((c, i) => (
               <button
                 key={c.id}
                 className={`player-chapter-row ${c === currentChapter ? "active" : ""}`}
                 onClick={() => playback.seekTo(c.startS)}
               >
-                {/* No position number: the list counts front matter (credits, dedication, prologue) that the book's
-                    chapter numbers don't, so "26" sat beside the book's "Chapter 25". The title says which chapter it is. */}
-                <span className="player-chapter-title">{c.title}</span>
+                {/* "Chapter 33: The Gate" — the book's own number, not the row's position (the list also holds
+                    credits, contents, dedication… that the book's numbering doesn't count). */}
+                <span className="player-chapter-title">{chapterLabels[i].label}</span>
                 <span className="t">{formatTime(c.startS)}</span>
               </button>
             ))}

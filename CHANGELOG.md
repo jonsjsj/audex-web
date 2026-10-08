@@ -18,10 +18,18 @@ here whenever there's something worth shipping.
 - **Auto "Left off" markers in the audio player** are now named like Audex's ("Left off · 1:23:45") instead of a device
   and clock string.
 
+### Added
+- **Previous / next chapter buttons** beside the 30-second skips in the audio player (and on the OS media controls).
+  Previous restarts the current chapter, or goes back one when you're just past its start.
+- **Chapters read "Chapter 33: The Gate"** on the player's title screen, in the chapter list and on the book page.
+  The number is the book's own: front and back matter (opening credits, contents, dedication, prologue,
+  epilogue, acknowledgements) stays in the list as its own named entry without a number. Same rules as Audex
+  (`docs/CHAPTERS.md`).
+
 ### Fixed
 - **Chapter numbers off by one or two.** The player's chapter list numbered rows by position, which counts front
   matter (opening credits, dedication, prologue) that the book's own chapter numbers don't — so the book's
-  Chapter 25 showed as 26. The list now shows the chapters' own titles without a position number.
+  Chapter 25 showed as 26. The number is now the book's own (see above).
 
 ## [0.7.5] - 2026-10-07
 
