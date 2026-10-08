@@ -1848,6 +1848,22 @@ input:focus {
   flex: 1;
   min-width: 0;
 }
+.reader-bm-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.reader-bm-meta,
+.player-bm-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.player-bm-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
+}
 .reader-bm-pct {
   flex: none;
   font-family: var(--mono);

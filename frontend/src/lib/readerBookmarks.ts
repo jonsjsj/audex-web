@@ -1,25 +1,29 @@
-// Reading bookmarks, stored the way the Audex app stores them.
+// Reading bookmarks, stored the way the Audex app stores them (docs/BOOKMARKS.md).
 //
-// A book that has an audiobook edition keeps its bookmarks IN AUDIOBOOKSHELF, as
-// a point in the audio: seconds = (how far through the book) × (audio duration).
-// That's the Audex app's own scheme (ReaderViewModel.addReadingBookmark), so a
-// bookmark made here shows up there and the other way round. ABS bookmarks are
-// time-based, so a book with no audio at all has no duration to express one in —
-// those are kept by audex-web itself instead (see api/read.py), on this server only.
+// Every bookmark lives in AUDIOBOOKSHELF, so Audex, Webdex and Codex all show the same ones, each with the time it
+// was made and the app/device it was made on (lib/bookmarkTitle.ts):
+//  * a book with an audiobook keeps them on the audio item as seconds: seconds = (how far through the book) ×
+//    (audio duration) — the Audex app's own scheme (ReaderViewModel.addReadingBookmark);
+//  * a book with no audio has no duration, so they sit on the ebook item as whole numbers:
+//    time = round(fraction × EBOOK_SCALE), never 0 (Audiobookshelf refuses 0). Same scale in Audex (EbookBookmarks).
 import { api } from "../api/client";
+import { parseTitle } from "./bookmarkTitle";
 
 export interface ReaderBookmark {
   /** Opaque, unique within a store (the audio second for ABS, the row id locally). */
   key: string;
   fraction: number; // 0..1 through the whole book
+  /** The bookmark's own words (the app/device tag is split off into [origin]). */
   title: string;
+  /** "Webdex · Chrome on Linux" — which app and device made it; null for one made by another client. */
+  origin: string | null;
   createdAt: number | null;
   /** A "Left off" marker dropped automatically on a big jump, not one you made. */
   auto: boolean;
 }
 
 export interface BookmarkStore {
-  /** True when the bookmarks live in Audiobookshelf (and so reach the Audex app). */
+  /** Always true: bookmarks live in Audiobookshelf, so every app shows them. */
   synced: boolean;
   list(): Promise<ReaderBookmark[]>;
   add(fraction: number, title: string): Promise<void>;
@@ -36,48 +40,60 @@ const MAX_AUTO = 5;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 export const bookmarkTitle = (fraction: number) => `Bookmark · ${Math.round(fraction * 100)}%`;
 
-export function absStore(audioItemId: string, durationS: number): BookmarkStore {
+/** Scale for a book with no audio: bookmark time = fraction × this. Identical in the Audex app. */
+export const EBOOK_SCALE = 100000;
+
+function absBookmarks(itemId: string, scale: number, timeFor: (fraction: number) => number): BookmarkStore {
   return {
     synced: true,
     async list() {
-      const rows = await api.bookmarks(audioItemId);
-      return rows.map((b) => ({
-        key: String(b.timeS),
-        fraction: clamp01(b.timeS / durationS),
-        title: b.title,
-        createdAt: b.createdAt,
-        auto: b.title.startsWith(AUTO_PREFIX),
-      }));
+      const rows = await api.bookmarks(itemId);
+      return rows.map((b) => {
+        const p = parseTitle(b.title);
+        return {
+          key: String(b.timeS),
+          fraction: clamp01(b.timeS / scale),
+          title: p.note,
+          origin: p.origin,
+          createdAt: b.createdAt,
+          auto: p.note.startsWith(AUTO_PREFIX),
+        };
+      });
     },
     async add(fraction, title) {
-      await api.addBookmark(audioItemId, { timeS: Math.floor(clamp01(fraction) * durationS), title });
+      await api.addBookmark(itemId, { timeS: timeFor(clamp01(fraction)), title });
     },
     async remove(b) {
-      await api.removeBookmark(audioItemId, Number(b.key));
+      await api.removeBookmark(itemId, Number(b.key));
     },
   };
 }
 
-export function localStore(itemId: string): BookmarkStore {
-  return {
-    synced: false,
-    async list() {
-      const rows = await api.readerBookmarks(itemId);
-      return rows.map((b) => ({
-        key: String(b.id),
-        fraction: clamp01(b.fraction),
-        title: b.title,
-        createdAt: b.createdAt,
-        auto: b.title.startsWith(AUTO_PREFIX),
-      }));
-    },
-    async add(fraction, title) {
-      await api.addReaderBookmark(itemId, { fraction: clamp01(fraction), title });
-    },
-    async remove(b) {
-      await api.removeReaderBookmark(itemId, Number(b.key));
-    },
-  };
+/** A book with an audiobook: bookmarks are audio seconds on the audio item. */
+export function absStore(audioItemId: string, durationS: number): BookmarkStore {
+  return absBookmarks(audioItemId, durationS, (f) => Math.max(1, Math.floor(f * durationS)));
+}
+
+/** A book with no audio: bookmarks sit on the ebook item as fraction × EBOOK_SCALE. */
+export function ebookStore(itemId: string): BookmarkStore {
+  return absBookmarks(itemId, EBOOK_SCALE, (f) => Math.max(1, Math.round(f * EBOOK_SCALE)));
+}
+
+/** Older versions kept an ebook-only book's bookmarks in audex-web's own database, visible to nobody else. Move
+ *  them into Audiobookshelf (they take the time they're moved) and clear the local copy. Returns how many moved. */
+export async function moveLocalBookmarks(itemId: string, store: BookmarkStore): Promise<number> {
+  const local = await api.readerBookmarks(itemId).catch(() => []);
+  let moved = 0;
+  for (const b of local) {
+    try {
+      await store.add(b.fraction, b.title);
+      await api.removeReaderBookmark(itemId, b.id);
+      moved++;
+    } catch {
+      break; // Audiobookshelf unreachable: keep the rest locally, try again next time
+    }
+  }
+  return moved;
 }
 
 /** Drop a "Left off" marker at [from] — where you were before a big jump — unless

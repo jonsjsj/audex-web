@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
 import { progressionAt, timeAtProgression } from "./syncMap";
-import { bookmarkTitle } from "./platform";
+import { tagTitle } from "./bookmarkTitle";
 
 const SYNC_INTERVAL_MS = 15_000;
 export const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
@@ -376,17 +376,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    *  is a background safety net, not a user-requested action. */
   function maybeAutoBookmark(fromS: number, toS: number) {
     if (!itemId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
-    const title = bookmarkTitle();
+    // Named like the Audex app names its own: where you were, as a percentage of the book.
+    const total = stateRef.current.durationS;
+    const title = `Left off · ${total > 0 ? `${Math.round((fromS / total) * 100)}%` : formatTime(fromS)}`;
     api
       .addBookmark(itemId, { timeS: fromS, title })
-      .then(() => setBookmarks((prev) => [...prev, { timeS: fromS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))
+      .then(() => setBookmarks((prev) => [...prev, { timeS: Math.max(1, Math.round(fromS)), title: tagTitle(title), createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))
       .catch(() => {});
   }
 
   async function addBookmark(timeS: number, title: string) {
     if (!itemId) return;
     await api.addBookmark(itemId, { timeS, title });
-    setBookmarks((prev) => [...prev, { timeS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
+    setBookmarks((prev) => [...prev, { timeS: Math.max(1, Math.round(timeS)), title: tagTitle(title), createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
   }
 
   async function removeBookmark(timeS: number) {

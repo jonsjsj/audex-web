@@ -36,9 +36,11 @@ import {
   BookmarkStore,
   dropLeftOff,
   JUMP_THRESHOLD,
-  localStore,
+  ebookStore,
+  moveLocalBookmarks,
   ReaderBookmark,
 } from "../lib/readerBookmarks";
+import { madeAt } from "../lib/bookmarkTitle";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -613,9 +615,9 @@ export default function Reader() {
     toastTimerRef.current = setTimeout(() => setToast(null), ms);
   }
 
-  // Where this book's bookmarks live: in Audiobookshelf when there's an audiobook
-  // edition to hang them on (this item's own audio, or a paired audio item —
-  // shared with the Audex app), otherwise on this server (see lib/readerBookmarks.ts).
+  // Where this book's bookmarks live: always in Audiobookshelf, so Audex and Codex show them too — on the
+  // audio item when there's an audiobook edition (this item's own audio, or a paired audio item), otherwise
+  // on this ebook item (see lib/readerBookmarks.ts and docs/BOOKMARKS.md).
   useEffect(() => {
     if (!itemId || !bookDetail) return;
     let cancelled = false;
@@ -628,7 +630,9 @@ export default function Reader() {
         next =
           other && other.numAudioFiles > 0 && (other.durationS ?? 0) > 0
             ? absStore(other.id, other.durationS!)
-            : localStore(itemId);
+            : ebookStore(itemId);
+        // Bookmarks an older version kept only in this app's own database go into Audiobookshelf too.
+        if (!other || other.numAudioFiles === 0) await moveLocalBookmarks(itemId, next);
       }
       if (cancelled) return;
       setStore(next);
@@ -1223,7 +1227,11 @@ export default function Reader() {
               bookmarks.map((b) => (
                 <div key={b.key} className="reader-panel-row">
                   <button className="reader-panel-item" onClick={act(() => goBookmark(b))}>
-                    <span className={b.auto ? "reader-bm-auto" : ""}>{b.title}</span>
+                    <span className="reader-bm-main">
+                      <span className={b.auto ? "reader-bm-auto" : ""}>{b.title}</span>
+                      {/* When it was made, and by which app and device. */}
+                      <span className="reader-bm-meta">{[madeAt(b.createdAt), b.origin && `via ${b.origin}`].filter(Boolean).join(" · ")}</span>
+                    </span>
                     <span className="reader-bm-pct">{Math.round(b.fraction * 100)}%</span>
                   </button>
                   <button className="reader-bm-del" onClick={act(() => void removeBookmark(b))} aria-label={`Delete bookmark ${b.title}`}>
@@ -1234,9 +1242,7 @@ export default function Reader() {
             )}
             {store && (
               <p className="reader-panel-note">
-                {store.synced
-                  ? "Saved to Audiobookshelf, so the Audex app shows them too."
-                  : "Saved on this server only — this book has no audiobook edition to share them through."}
+                Saved to Audiobookshelf with the time and where you made them, so the Audex app shows them too.
               </p>
             )}
           </div>
