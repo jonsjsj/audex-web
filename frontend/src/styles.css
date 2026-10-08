@@ -1491,7 +1491,7 @@ input:focus {
 .reader-top {
   position: relative;
   flex: none;
-  height: 1rem;
+  height: 1.4rem;
   z-index: 5;
 }
 .reader-top-handle {
@@ -1512,6 +1512,32 @@ input:focus {
 }
 .reader-top:hover .reader-top-handle::after,
 .reader-top.open .reader-top-handle::after {
+  opacity: 0;
+}
+/* The chapter you're in, always visible in the folded strip ("Chapter 33: The Gate"); it gives way to the
+   title bar (which names the chapter too) when that slides in. With a chapter showing, the little grab
+   pill isn't needed — the text itself is the handle. */
+.reader-top.has-chapter .reader-top-handle::after {
+  display: none;
+}
+.reader-top-chapter {
+  position: absolute;
+  inset: 0;
+  padding: 0 1rem;
+  text-align: center;
+  line-height: 1.4rem;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none; /* clicks fall through to the handle, which pins the bar open */
+  transition: opacity 0.15s ease;
+}
+.reader-top:hover .reader-top-chapter,
+.reader-top:focus-within .reader-top-chapter,
+.reader-top.open .reader-top-chapter {
   opacity: 0;
 }
 .reader-head {

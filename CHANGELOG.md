@@ -7,6 +7,15 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.7] - 2026-10-08
+
+### Fixed
+- **The ebook reader never showed which chapter you were in.** The chapter name lived in the title bar, which folds
+  away until the mouse is over it, so while reading it was invisible. It now stays on screen in the thin strip at
+  the top of the page, and reads **"Chapter 33: The Gate"** (same wording as the audio player) when the book's own
+  contents name the number. Front matter and unnumbered entries ("Cover", "The Gate") are shown as the book has
+  them rather than being given a number the book never gave them.
+
 ## [0.7.6] - 2026-10-08
 
 ### Changed
