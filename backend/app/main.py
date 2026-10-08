@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import activity as activity_api, admin, auth, library, play, read, readalong, report, sync as sync_api
+from app.api import activity as activity_api, admin, arr as arr_api, auth, library, play, read, readalong, report, sync as sync_api
 # Aliased: app.api.settings (this router) vs app.core.config.settings (the
 # Settings instance imported right below) would otherwise collide on the
 # same name in this module's namespace.
@@ -36,6 +36,7 @@ app.include_router(report.router)
 app.include_router(settings_api.router)
 app.include_router(sync_api.router)
 app.include_router(activity_api.router)
+app.include_router(arr_api.router)
 
 
 @app.get("/api/health")
