@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.connections import resolve
 from app.api.deps import get_current_identity
+from app.core import activity
 from app.core.config import settings
 from app.core.database import Identity, get_db
 
@@ -86,9 +87,17 @@ async def monitor(
         # Searching can take a while (each indexer is queried), so allow a generous timeout.
         async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(f"{gw}/monitor/{abs_id}", json={"fmt": body.fmt})
-    except httpx.HTTPError:
+    except httpx.HTTPError as e:
+        await activity.record(identity.id, "downloads", "Monitor & download", False,
+                              f"couldn't reach Codex: {activity.describe_error(e)}")
         raise HTTPException(502, "Couldn't reach Codex.")
     if r.status_code != 200:
         detail = r.json().get("detail") if r.headers.get("content-type", "").startswith("application/json") else None
+        await activity.record(identity.id, "downloads", "Monitor & download", False,
+                              detail or activity.describe_status(r.status_code))
         raise HTTPException(502, detail or "Couldn't start monitoring this book.")
-    return r.json()
+    result = r.json()
+    title = result.get("title") or "a book"
+    await activity.record(identity.id, "downloads", "Monitor & download", bool(result.get("ok")),
+                          f"{title}: {result.get('message') or ('monitoring' if result.get('ok') else 'not accepted')}")
+    return result
