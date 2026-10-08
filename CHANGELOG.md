@@ -7,6 +7,30 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.6] - 2026-10-08
+
+### Changed
+- **One set of bookmarks for Audex and Webdex.** Every bookmark is now kept in Audiobookshelf, including those of
+  a book with no audiobook (before, those stayed in Webdex only), and each says **when** it was made and **which
+  app and device** made it ("via Webdex · Chrome on Linux" / "via Audex · Google Pixel 8"). Webdex shows the time
+  and origin in the reader's Bookmarks and the player's list, and moves bookmarks it kept for ebook-only books into
+  Audiobookshelf the next time you open that book. The rules are in `docs/BOOKMARKS.md` (same in Audex).
+- **Auto "Left off" markers in the audio player** are now named like Audex's ("Left off · 1:23:45") instead of a device
+  and clock string.
+
+### Added
+- **Previous / next chapter buttons** beside the 30-second skips in the audio player (and on the OS media controls).
+  Previous restarts the current chapter, or goes back one when you're just past its start.
+- **Chapters read "Chapter 33: The Gate"** on the player's title screen, in the chapter list and on the book page.
+  The number is the book's own: front and back matter (opening credits, contents, dedication, prologue,
+  epilogue, acknowledgements) stays in the list as its own named entry without a number. Same rules as Audex
+  (`docs/CHAPTERS.md`).
+
+### Fixed
+- **Chapter numbers off by one or two.** The player's chapter list numbered rows by position, which counts front
+  matter (opening credits, dedication, prologue) that the book's own chapter numbers don't — so the book's
+  Chapter 25 showed as 26. The number is now the book's own (see above).
+
 ## [0.7.5] - 2026-10-07
 
 ### Changed

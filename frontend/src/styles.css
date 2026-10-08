@@ -1176,7 +1176,7 @@ input:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2rem;
+  gap: 1.2rem;
   margin: 1.5rem 0;
 }
 .player-play {
@@ -1202,6 +1202,10 @@ input:focus {
   cursor: pointer;
   padding: 0.5rem;
   border-radius: 999px;
+}
+.player-chapter-skip:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .player-skip-n {
   font-family: var(--mono);
@@ -1847,6 +1851,22 @@ input:focus {
   gap: 0.8rem;
   flex: 1;
   min-width: 0;
+}
+.reader-bm-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.reader-bm-meta,
+.player-bm-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.player-bm-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  text-align: left;
 }
 .reader-bm-pct {
   flex: none;

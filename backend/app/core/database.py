@@ -66,13 +66,9 @@ class AbsServer(Base):
 
 
 class ReaderBookmark(Base):
-    """A reading bookmark for a book that has NO audiobook edition to hang it on.
-
-    Books with audio keep their bookmarks in Audiobookshelf itself, as a point in
-    the audio (`fraction × duration`), exactly the way the Audex app does — so
-    they're shared with it. An ebook-only book has no duration to express a
-    position in, and ABS bookmarks are time-based, so those live here instead:
-    per person, on this server only. `item_id` is the namespaced id used at the
+    """LEGACY: a reading bookmark an older version kept for a book with no audiobook edition, visible to nobody
+    but this server. Bookmarks now live in Audiobookshelf for every book (docs/BOOKMARKS.md); the reader moves a
+    book's rows there the next time it is opened and deletes them. `item_id` is the namespaced id used at the
     API boundary (see app/api/connections.py)."""
     __tablename__ = "reader_bookmarks"
 

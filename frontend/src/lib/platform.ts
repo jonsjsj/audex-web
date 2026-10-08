@@ -48,16 +48,19 @@ function platformLabel(): string {
   return cached ?? crudeGuess();
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
+/** The browser, from the User-Agent (order matters: Edge and Opera also say "Chrome"). */
+function browserName(): string {
+  const ua = navigator.userAgent;
+  if (/Edg\//.test(ua)) return "Edge";
+  if (/OPR\/|Opera/.test(ua)) return "Opera";
+  if (/Firefox\//.test(ua)) return "Firefox";
+  if (/Chrome\/|CriOS\//.test(ua)) return "Chrome";
+  if (/Safari\//.test(ua)) return "Safari";
+  return "Browser";
 }
 
-/** "webaudex win 11 21.42 19.09" — platform, then wall-clock time and date
- *  (not the position IN the book, which the bookmark row already shows next
- *  to the title — this is about WHEN and FROM WHAT the bookmark was made). */
-export function bookmarkTitle(): string {
-  const now = new Date();
-  const time = `${pad(now.getHours())}.${pad(now.getMinutes())}`;
-  const date = `${pad(now.getDate())}.${pad(now.getMonth() + 1)}`;
-  return `webaudex ${platformLabel().toLowerCase()} ${time} ${date}`;
+/** "Chrome on Windows 11" — which browser and system a bookmark was made on, shown next to it in every app. */
+export function deviceName(): string {
+  const os = platformLabel().replace(/^Win\b/, "Windows").replace(/^Mac$/, "macOS");
+  return `${browserName()} on ${os}`;
 }

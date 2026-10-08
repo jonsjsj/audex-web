@@ -1,5 +1,6 @@
 // Thin fetch wrapper for the /api surface (see the plan §4). credentials:"include"
 // so the httpOnly session cookie rides along — there is never a token in JS to attach.
+import { tagTitle } from "../lib/bookmarkTitle";
 
 export interface Health {
   status: string;
@@ -300,8 +301,12 @@ export const api = {
   discardAudioProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/play/${itemId}/progress`, { method: "DELETE" }),
   bookmarks: (itemId: string) => request<Bookmark[]>(`/api/play/${itemId}/bookmarks`),
+  // Every bookmark is tagged with the app and device that made it (lib/bookmarkTitle.ts) — in the one place all callers go through.
   addBookmark: (itemId: string, body: { timeS: number; title: string }) =>
-    request<{ ok: true }>(`/api/play/${itemId}/bookmarks`, { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: true }>(`/api/play/${itemId}/bookmarks`, {
+      method: "POST",
+      body: JSON.stringify({ timeS: Math.max(1, Math.round(body.timeS)), title: tagTitle(body.title) }),
+    }),
   removeBookmark: (itemId: string, timeS: number) =>
     request<{ ok: true }>(`/api/play/${itemId}/bookmarks/${Math.round(timeS)}`, { method: "DELETE" }),
 

@@ -1,3 +1,4 @@
+import { labelChapters } from "../lib/chapters";
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
@@ -455,9 +456,9 @@ export default function BookDetail() {
       {book.chapters.length > 0 && (
         <div className="book-detail-section">
           <div className="l">CHAPTERS</div>
-          {book.chapters.map((c) => (
-            <div key={c.id} className="player-chapter-row" style={{ cursor: "default" }}>
-              <span>{c.title}</span>
+          {labelChapters(book.chapters.map((c) => c.title)).map((c, i) => (
+            <div key={book.chapters[i].id} className="player-chapter-row" style={{ cursor: "default" }}>
+              <span>{c.label}</span>
             </div>
           ))}
         </div>

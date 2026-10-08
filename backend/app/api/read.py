@@ -203,12 +203,10 @@ async def discard_position(
     return {"ok": True}
 
 
-# ─── Reading bookmarks for books with no audiobook edition ──────────────────
-# A book WITH audio keeps its bookmarks in Audiobookshelf (a point in the audio,
-# via the /api/play/{id}/bookmarks routes — shared with the Audex app). An
-# ebook-only book has no duration to express a position in, so its bookmarks
-# are kept here instead: per person, on this server only. See
-# core/database.py's ReaderBookmark.
+# ─── Legacy reading bookmarks ───────────────────────────────────────────────
+# Every bookmark now lives in Audiobookshelf (docs/BOOKMARKS.md) so Audex and Codex show it too. These routes are
+# only what an older version wrote for an ebook-only book — its own database, visible to nobody else: the reader
+# lists them once, moves each into Audiobookshelf and deletes the local row. See core/database.py's ReaderBookmark.
 
 class BookmarkBody(BaseModel):
     fraction: float  # 0..1 through the whole book

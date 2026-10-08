@@ -1,9 +1,10 @@
-import { createContext, ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
 import { progressionAt, timeAtProgression } from "./syncMap";
-import { bookmarkTitle } from "./platform";
+import { tagTitle } from "./bookmarkTitle";
+import { chapterIndexAt, labelChapters, nextChapterStart, previousChapterStart } from "./chapters";
 
 const SYNC_INTERVAL_MS = 15_000;
 export const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
@@ -61,6 +62,10 @@ interface PlaybackState {
   play: (itemId: string) => void;
   seekTo: (targetS: number) => void;
   skip: (deltaS: number) => void;
+  /** Previous (-1) / next (1) chapter: previous restarts the current chapter, or goes back one near its start. */
+  skipChapter: (direction: 1 | -1) => void;
+  /** "Chapter 33: The Gate" for the chapter playing now (null with no chapters). */
+  chapterLabel: string | null;
   togglePlayPause: () => void;
   cycleSpeed: () => void;
   cycleSleep: () => void;
@@ -130,6 +135,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // it directly — positionS changes on every timeupdate (several times a
   // second), and an effect keyed on it would tear down/recreate the interval
   // that often, so the 15s sync would never actually survive to fire.
+  const chapterLabels = useMemo(() => labelChapters((session?.chapters ?? []).map((c) => c.title)), [session]);
+  const chapterIdx = chapterIndexAt(session?.chapters ?? [], positionS);
+  const chapterLabel = chapterIdx >= 0 ? chapterLabels[chapterIdx].label : null;
+
+  // The latest chapter list for handlers that outlive a render (the OS media-session buttons).
+  const chaptersRef = useRef<{ startS: number }[]>([]);
+  chaptersRef.current = session?.chapters ?? [];
   const positionRef = useRef(0);
   useEffect(() => {
     positionRef.current = positionS;
@@ -251,20 +263,25 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: book.title,
       artist: book.author ?? undefined,
+      album: chapterLabel ?? undefined, // the lock screen shows which chapter you're in
       artwork: [{ src: book.coverUrl, sizes: "400x400", type: "image/jpeg" }],
     });
     navigator.mediaSession.setActionHandler("play", () => audioRef.current?.play());
     navigator.mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
     navigator.mediaSession.setActionHandler("seekbackward", () => skip(-30));
     navigator.mediaSession.setActionHandler("seekforward", () => skip(30));
+    navigator.mediaSession.setActionHandler("previoustrack", () => skipChapter(-1));
+    navigator.mediaSession.setActionHandler("nexttrack", () => skipChapter(1));
     return () => {
       navigator.mediaSession.setActionHandler("play", null);
       navigator.mediaSession.setActionHandler("pause", null);
       navigator.mediaSession.setActionHandler("seekbackward", null);
       navigator.mediaSession.setActionHandler("seekforward", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book]);
+  }, [book, chapterLabel]);
 
   useEffect(() => {
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
@@ -305,6 +322,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   function skip(deltaS: number) {
     seekTo(positionRef.current + deltaS);
+  }
+
+  function skipChapter(direction: 1 | -1) {
+    const chapters = chaptersRef.current;
+    const target = direction > 0 ? nextChapterStart(chapters, positionRef.current) : previousChapterStart(chapters, positionRef.current);
+    if (target !== null) seekTo(target);
   }
 
   function togglePlayPause() {
@@ -376,17 +399,18 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    *  is a background safety net, not a user-requested action. */
   function maybeAutoBookmark(fromS: number, toS: number) {
     if (!itemId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
-    const title = bookmarkTitle();
+    // Named like the Audex player names its own: where you were.
+    const title = `Left off · ${formatTime(fromS)}`;
     api
       .addBookmark(itemId, { timeS: fromS, title })
-      .then(() => setBookmarks((prev) => [...prev, { timeS: fromS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))
+      .then(() => setBookmarks((prev) => [...prev, { timeS: Math.max(1, Math.round(fromS)), title: tagTitle(title), createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))
       .catch(() => {});
   }
 
   async function addBookmark(timeS: number, title: string) {
     if (!itemId) return;
     await api.addBookmark(itemId, { timeS, title });
-    setBookmarks((prev) => [...prev, { timeS, title, createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
+    setBookmarks((prev) => [...prev, { timeS: Math.max(1, Math.round(timeS)), title: tagTitle(title), createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS));
   }
 
   async function removeBookmark(timeS: number) {
@@ -444,6 +468,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     play,
     seekTo,
     skip,
+    skipChapter,
+    chapterLabel,
     togglePlayPause,
     cycleSpeed,
     cycleSleep,

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { usePlayback, formatTime } from "../lib/PlaybackContext";
-import { bookmarkTitle } from "../lib/platform";
+import { madeAt, parseTitle } from "../lib/bookmarkTitle";
+import { chapterIndexAt, labelChapters } from "../lib/chapters";
 import { timeAtProgression } from "../lib/syncMap";
 
 const SKIP_S = 30;
@@ -77,7 +78,7 @@ export default function Player() {
   }, [playback.session, playback.itemId, urlItemId]);
 
   function openAddBookmark() {
-    setAddBookmarkNote(bookmarkTitle());
+    setAddBookmarkNote("Bookmark");
     setAddBookmarkError(null);
     setAddBookmarkOpen(true);
   }
@@ -87,7 +88,7 @@ export default function Player() {
     setAddingBookmark(true);
     setAddBookmarkError(null);
     const timeS = playback.positionRef.current;
-    const title = addBookmarkNote.trim() || bookmarkTitle();
+    const title = addBookmarkNote.trim() || "Bookmark";
     try {
       await playback.addBookmark(timeS, title);
       setAddBookmarkOpen(false);
@@ -168,6 +169,7 @@ export default function Player() {
   const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, readAlong } = playback;
   const shown = scrubbing ?? positionS;
   const currentChapter = session!.chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
+  const chapterLabels = labelChapters(session!.chapters.map((c) => c.title));
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
   const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
   const readingAheadS = (book!.hasEbook || book!.pairedItemId) && readAlong.map ? timeAtProgression(readAlong.map, book!.ebookProgress) : null;
@@ -218,7 +220,7 @@ export default function Player() {
       {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
 
       <div className="player-progress-section">
-        <p className="player-current-chapter">{currentChapter?.title ?? ""}</p>
+        <p className="player-current-chapter">{playback.chapterLabel ?? ""}</p>
 
         <div className="player-scrub">
           <div className="player-scrub-track">
@@ -253,7 +255,7 @@ export default function Player() {
                     className="player-scrub-mark"
                     style={{ left: `${(bm.timeS / session!.durationS) * 100}%` }}
                     onClick={() => playback.seekTo(bm.timeS)}
-                    aria-label={`Jump to bookmark: ${bm.title}`}
+                    aria-label={`Jump to bookmark: ${parseTitle(bm.title).note}`}
                   />
                 ))}
               </div>
@@ -275,6 +277,15 @@ export default function Player() {
       </div>
 
       <div className="player-transport">
+        <button
+          className="player-skip player-chapter-skip"
+          onClick={() => playback.skipChapter(-1)}
+          disabled={session!.chapters.length === 0}
+          aria-label="Previous chapter"
+          title="Previous chapter"
+        >
+          ⏮<span className="player-skip-n">CH</span>
+        </button>
         <button className="player-skip" onClick={() => playback.skip(-SKIP_S)} aria-label={`Back ${SKIP_S}s`}>
           ⟲<span className="player-skip-n">{SKIP_S}</span>
         </button>
@@ -283,6 +294,15 @@ export default function Player() {
         </button>
         <button className="player-skip" onClick={() => playback.skip(SKIP_S)} aria-label={`Forward ${SKIP_S}s`}>
           <span className="player-skip-n">{SKIP_S}</span>⟳
+        </button>
+        <button
+          className="player-skip player-chapter-skip"
+          onClick={() => playback.skipChapter(1)}
+          disabled={session!.chapters.length === 0 || chapterIndexAt(session!.chapters, shown) >= session!.chapters.length - 1}
+          aria-label="Next chapter"
+          title="Next chapter"
+        >
+          ⏭<span className="player-skip-n">CH</span>
         </button>
       </div>
 
@@ -351,8 +371,9 @@ export default function Player() {
                 className={`player-chapter-row ${c === currentChapter ? "active" : ""}`}
                 onClick={() => playback.seekTo(c.startS)}
               >
-                <span className="player-chapter-idx">{String(i + 1).padStart(2, "0")}</span>
-                <span className="player-chapter-title">{c.title}</span>
+                {/* "Chapter 33: The Gate" — the book's own number, not the row's position (the list also holds
+                    credits, contents, dedication… that the book's numbering doesn't count). */}
+                <span className="player-chapter-title">{chapterLabels[i].label}</span>
                 <span className="t">{formatTime(c.startS)}</span>
               </button>
             ))}
@@ -365,7 +386,13 @@ export default function Player() {
           {bookmarks.map((bm) => (
             <div key={bm.timeS} className="player-chapter-row player-bookmark-row">
               <button className="player-bookmark-jump" onClick={() => playback.seekTo(bm.timeS)}>
-                <span>{bm.title}</span>
+                <span className="player-bm-main">
+                  <span>{parseTitle(bm.title).note}</span>
+                  {/* When it was made, and by which app and device. */}
+                  <span className="player-bm-meta">
+                    {[madeAt(bm.createdAt), parseTitle(bm.title).origin && `via ${parseTitle(bm.title).origin}`].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
                 <span className="t">{formatTime(bm.timeS)}</span>
               </button>
               <button
