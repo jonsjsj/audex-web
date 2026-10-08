@@ -376,9 +376,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    *  is a background safety net, not a user-requested action. */
   function maybeAutoBookmark(fromS: number, toS: number) {
     if (!itemId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
-    // Named like the Audex app names its own: where you were, as a percentage of the book.
-    const total = stateRef.current.durationS;
-    const title = `Left off · ${total > 0 ? `${Math.round((fromS / total) * 100)}%` : formatTime(fromS)}`;
+    // Named like the Audex player names its own: where you were.
+    const title = `Left off · ${formatTime(fromS)}`;
     api
       .addBookmark(itemId, { timeS: fromS, title })
       .then(() => setBookmarks((prev) => [...prev, { timeS: Math.max(1, Math.round(fromS)), title: tagTitle(title), createdAt: Date.now() }].sort((a, b) => a.timeS - b.timeS)))

@@ -15,7 +15,7 @@ here whenever there's something worth shipping.
   app and device** made it ("via Webdex · Chrome on Linux" / "via Audex · Google Pixel 8"). Webdex shows the time
   and origin in the reader's Bookmarks and the player's list, and moves bookmarks it kept for ebook-only books into
   Audiobookshelf the next time you open that book. The rules are in `docs/BOOKMARKS.md` (same in Audex).
-- **Auto "Left off" markers in the audio player** are now named like Audex's ("Left off · 42%") instead of a device
+- **Auto "Left off" markers in the audio player** are now named like Audex's ("Left off · 1:23:45") instead of a device
   and clock string.
 
 ### Fixed
