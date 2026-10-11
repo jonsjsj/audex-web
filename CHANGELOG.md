@@ -7,6 +7,24 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.9] - 2026-10-11
+
+### Fixed
+- **Reading and listening meet on the exact sentence, like in the Audex app.** Switching from the text to the audio
+  now starts the narration at the first sentence on your page (the reader saves the page's first text beside your
+  position) instead of a guess from how far down the chapter you were, which could land tens of seconds off.
+  Switching from the audio to the text opens the book on the sentence being spoken, and "follow the audio" turns the
+  page to it the same way. The last page turn is also saved when you close the tab or switch away, so going straight
+  to the audiobook doesn't start a page behind.
+
+### Changed
+- **Chapters with the book's real names when the file only counts them.** An audiobook that lists nothing but
+  "Chapter 1 … Chapter 78" (counting the credits and the book summary, so the book's chapter 1 showed as Chapter 3) is
+  now named from the ebook's own contents — "Chapter 1: A Person the Other Used to Know" — placed exactly where the
+  read-along map says each one is spoken. It needs the book's ebook and a finished read-along map, and is skipped when
+  Codex has already heard the narrator name most of the chapters. "Thank you for reading…", summaries, recaps, outros
+  and closing credits are no longer numbered as chapters. See `docs/CHAPTERS.md`.
+
 ## [0.7.8] - 2026-10-11
 
 ### Added

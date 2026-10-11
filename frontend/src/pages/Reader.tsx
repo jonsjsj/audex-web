@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@readium/shared";
+import { HttpFetcher, Locator, LocatorLocations, LocatorText, Manifest, Publication } from "@readium/shared";
 import { EpubNavigator, EpubNavigatorListeners } from "@readium/navigator";
-import { api, BookDetail } from "../api/client";
+import { api, BookDetail, SyncMap } from "../api/client";
 import { useShell } from "../components/Shell";
 import { labelTocTitles } from "../lib/chapters";
 import { usePlayback } from "../lib/PlaybackContext";
@@ -29,7 +29,7 @@ import {
   toEpubPreferences,
   usePrefersDark,
 } from "../lib/readerAppearance";
-import { progressionAt, timeAtProgression } from "../lib/syncMap";
+import { progressionAt, textTargetAt, timeAtPage, timeAtProgression } from "../lib/syncMap";
 import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
 import {
   absStore,
@@ -280,6 +280,31 @@ export default function Reader() {
     return nearestLocatorForProgression(positionsRef.current, total);
   }
 
+  /** A locator on the very sentence the narration is at [seconds]: its chapter, how far through it (by characters)
+   *  and the sentence's own text — Readium finds the text itself, the depth is only its fallback. Undefined when the
+   *  map has no position there or the chapter isn't in this book's reading order. */
+  function locatorAtTime(map: SyncMap, seconds: number): Locator | undefined {
+    const target = textTargetAt(map, seconds);
+    if (!target) return undefined;
+    const clean = (h: string) => h.split("#")[0].replace(/^\/+/, "");
+    const base = (h: string) => h.split("/").pop();
+    const items = positionsRef.current;
+    const want = clean(target.href);
+    let at = items.findIndex((p) => clean(p.href.toString()) === want);
+    if (at < 0) at = items.findIndex((p) => clean(p.href.toString()).endsWith(`/${want}`) || want.endsWith(`/${clean(p.href.toString())}`));
+    if (at < 0) at = items.findIndex((p) => base(clean(p.href.toString())) === base(want));
+    if (at < 0) return undefined;
+    const href = items[at].href.toString();
+    const w = weightsRef.current;
+    const total = (w ? totalFromLocation(w, href, target.progression) : null) ?? progressionAt(map, seconds) ?? 0;
+    return new Locator({
+      href,
+      type: items[at].type,
+      locations: new LocatorLocations({ position: at + 1, progression: target.progression, totalProgression: total }),
+      text: target.text ? new LocatorText({ highlight: target.text.slice(0, 120) }) : undefined,
+    });
+  }
+
   // Latest key-action handler, reachable from the long-lived listeners below
   // (Readium's `peripheral` callback is created once, inside open()).
   const actionRef = useRef<(action: string) => void>(() => {});
@@ -368,12 +393,22 @@ export default function Reader() {
         if (atProgression !== null && Number.isFinite(atProgression) && positions.length > 0) {
           explicitProgressionRef.current = true;
           initialLocator = locatorAtTotal(atProgression);
+          // The Player also says WHEN in the audio it was: through the map that is the very sentence being
+          // spoken, which the whole-book fraction alone can't pin down.
+          const atTime = Number(searchParams.get("atTime"));
+          if (searchParams.get("atTime") !== null && Number.isFinite(atTime)) {
+            const audioId = detail && detail.numAudioFiles > 0 ? itemId! : detail?.pairedItemId;
+            const map = audioId ? await api.readAlongMap(audioId).catch(() => null) : null;
+            const exact = map ? locatorAtTime(map, atTime) : undefined;
+            if (exact) initialLocator = exact;
+          }
           // Consume the param so a refresh resumes from the real saved
           // position instead of re-jumping back here every time.
           setSearchParams(
             (prev) => {
               const next = new URLSearchParams(prev);
               next.delete("atProgression");
+              next.delete("atTime");
               return next;
             },
             { replace: true },
@@ -401,7 +436,7 @@ export default function Reader() {
             const audioId = detail.numAudioFiles > 0 ? itemId! : detail.pairedItemId;
             const map = audioId ? await api.readAlongMap(audioId).catch(() => null) : null;
             const exact = map ? progressionAt(map, detail.audioTimeS) : null;
-            const target = locatorAtTotal(exact ?? detail.audioProgress);
+            const target = (map ? locatorAtTime(map, detail.audioTimeS) : undefined) ?? locatorAtTotal(exact ?? detail.audioProgress);
             if (target) {
               initialLocator = target;
               resumeNote = exact !== null ? "Resumed from your listening progress" : "Resumed near your listening progress";
@@ -421,6 +456,16 @@ export default function Reader() {
             // on every book open.
             const loc = nav?.currentLocator ?? locator;
             if (!loc?.locations) return;
+            // The reply to our "first text on the page" request (below) arrives as a position change of its own,
+            // carrying the page's text. It isn't a page turn: keep the text for the save and change nothing else.
+            if (loc.text && awaitingTextRef.current) {
+              awaitingTextRef.current = false;
+              const text = loc.text.highlight?.trim() || null;
+              pageTextRef.current = text;
+              if (pendingRef.current) pendingRef.current.pageStart = text;
+              return;
+            }
+            pageTextRef.current = null;
             const total = totalOf(loc);
             const step = total - lastTotalRef.current;
             if (!selfNavRef.current && step > 0 && step < 0.05) pageSpanRef.current = step; // one page, as turned by hand
@@ -433,6 +478,14 @@ export default function Reader() {
             const w = weightsRef.current;
             if (w) setCurrentIdx(Math.max(0, w.hrefs.indexOf(loc.href.toString().split("#")[0])));
             queueSave(itemId!, loc, total);
+            // Ask which text begins this page: saved beside the locator so the audio can start at that sentence.
+            try {
+              awaitingTextRef.current = true;
+              nav?._cframes[0]?.msg?.send("first_visible_locator", undefined);
+            } catch {
+              awaitingTextRef.current = false;
+              /* internal API — without it the audio falls back to the page's % */
+            }
           },
           timelineItemChanged: () => {},
           tap: () => false,
@@ -508,7 +561,7 @@ export default function Reader() {
     const here = progressionRef.current;
     const slack = Math.max(0.002, pageSpanRef.current * 1.1);
     if (p >= here - 0.0005 && p <= here + slack) return; // the narrator is on this page
-    const target = locatorAtTotal(p);
+    const target = locatorAtTime(readAlong.map, playback.positionS) ?? locatorAtTotal(p);
     if (!target) return;
     selfNavRef.current = true; // so this jump isn't mistaken for a page turn by hand
     navRef.current?.go(target, false, () => {});
@@ -526,26 +579,49 @@ export default function Reader() {
     });
   }
 
+  // A closed or backgrounded tab never runs the unmount cleanup above, so the page turned in the last couple of
+  // seconds would be lost — and switching to the audiobook straight after reading would start it a page behind.
+  useEffect(() => {
+    if (!itemId) return;
+    const leave = () => flushSave(itemId, true);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") leave();
+    };
+    window.addEventListener("pagehide", leave);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemId]);
+
   // Debounced, not on every positionChanged — a fast page-turner would
   // otherwise fire a PATCH per page. Coalesces to the LATEST position only:
   // fine to drop an intermediate position, never fine to drop the final one
   // (the unmount cleanup above flushes it synchronously on the way out).
-  const pendingRef = useRef<{ locator: Locator; total: number } | null>(null);
+  const pendingRef = useRef<{ locator: Locator; total: number; pageStart?: string | null } | null>(null);
+  // The first text on the page being shown, once Readium has said (see positionChanged).
+  const pageTextRef = useRef<string | null>(null);
+  const awaitingTextRef = useRef(false);
   function queueSave(id: string, locator: Locator, total: number) {
-    pendingRef.current = { locator, total };
+    pendingRef.current = { locator, total, pageStart: null };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => flushSave(id), SAVE_DEBOUNCE_MS);
   }
-  function flushSave(id: string) {
+  function flushSave(id: string, leaving = false) {
     const pending = pendingRef.current;
     if (!pending) return;
     pendingRef.current = null;
     // Readium's own totalProgression in the saved locator is chapter-granular;
     // overwrite it with the whole-book fraction so anything reading the stored
     // locator (not just ebookProgress) sees the real number.
-    const locator = pending.locator.serialize() as { locations?: { totalProgression?: number } };
+    const locator = pending.locator.serialize() as { locations?: { totalProgression?: number }; pageStart?: string };
     if (locator.locations) locator.locations.totalProgression = pending.total;
-    api.saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total }).catch(() => {});
+    // The page's first text, so the audiobook can start at that exact sentence (Audex does the same).
+    const pageStart = pending.pageStart ?? pageTextRef.current;
+    if (pageStart) locator.pageStart = pageStart.slice(0, 160);
+    api.saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total }, { keepalive: leaving }).catch(() => {});
   }
 
   /** A deliberate move by the reader: don't let following the audio yank the
@@ -720,7 +796,10 @@ export default function Reader() {
    *  side half of the cross-format jump (docs/SYNC_API.md §3). */
   function jumpToAudio() {
     if (!itemId || !readAlong.map) return;
-    const t = timeAtProgression(readAlong.map, progressionRef.current);
+    const here = navRef.current?.currentLocator;
+    const progression = here?.locations?.progression;
+    const exact = here && typeof progression === "number" ? timeAtPage(readAlong.map, here.href.toString(), progression, pageTextRef.current) : null;
+    const t = exact ?? timeAtProgression(readAlong.map, progressionRef.current);
     if (t === null) return;
     const playItemId = hasAudio ? itemId : bookDetail?.pairedItemId ?? itemId;
     navigate(`/play/${playItemId}?atTime=${t}`);

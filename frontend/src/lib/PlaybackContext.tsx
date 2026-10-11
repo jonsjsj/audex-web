@@ -1,10 +1,12 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
+import { api, Bookmark, BookDetail, Chapter, PlaySession } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
-import { progressionAt, timeAtProgression } from "./syncMap";
+import { progressionAt } from "./syncMap";
+import { audioTimeOfSavedReading } from "./readingSpot";
 import { tagTitle } from "./bookmarkTitle";
-import { chapterIndexAt, labelChaptersFor, LabeledChapter, nextChapterStart, previousChapterStart } from "./chapters";
+import { chapterIndexAt, LabeledChapter, nextChapterStart, previousChapterStart } from "./chapters";
+import { useBookChapters } from "./useBookChapters";
 import { useHeardChapters } from "./useHeardChapters";
 
 const SYNC_INTERVAL_MS = 15_000;
@@ -65,6 +67,11 @@ interface PlaybackState {
   skip: (deltaS: number) => void;
   /** Previous (-1) / next (1) chapter: previous restarts the current chapter, or goes back one near its start. */
   skipChapter: (direction: 1 | -1) => void;
+  /** The book's chapters as shown: the file's own or — when the file only counts them — the ebook's contents placed
+   *  by the read-along map (docs/CHAPTERS.md). */
+  chapters: Chapter[];
+  /** The audio second the saved reading position is narrated at (page-exact when known), or null. */
+  readingAheadS: number | null;
   /** "Chapter 33: The Gate" for the chapter playing now (null with no chapters). */
   chapterLabel: string | null;
   /** Every chapter's number/name/label — what the narrator said when Codex has listened to the book, else from the titles. */
@@ -139,16 +146,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // second), and an effect keyed on it would tear down/recreate the interval
   // that often, so the 15s sync would never actually survive to fire.
   const heardChapters = useHeardChapters(itemId);
-  const chapterLabels = useMemo(
-    () => labelChaptersFor((session?.chapters ?? []).map((c) => ({ title: c.title, startS: c.startS })), heardChapters),
-    [session, heardChapters],
-  );
-  const chapterIdx = chapterIndexAt(session?.chapters ?? [], positionS);
+  const sourceChapters = useMemo(() => session?.chapters ?? [], [session]);
+  const { chapters, labels: chapterLabels } = useBookChapters({
+    chapters: sourceChapters,
+    heard: heardChapters,
+    ebookItemId: book ? (book.hasEbook ? itemId : book.pairedItemId) : null,
+    map: readAlong.map,
+  });
+  const chapterIdx = chapterIndexAt(chapters, positionS);
   const chapterLabel = chapterIdx >= 0 ? chapterLabels[chapterIdx].label : null;
 
   // The latest chapter list for handlers that outlive a render (the OS media-session buttons).
   const chaptersRef = useRef<{ startS: number }[]>([]);
-  chaptersRef.current = session?.chapters ?? [];
+  chaptersRef.current = chapters;
   const positionRef = useRef(0);
   useEffect(() => {
     positionRef.current = positionS;
@@ -295,17 +305,33 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [isPlaying]);
 
   // ── Auto-resume from reading, if you've read further than you've listened ──
+  // Where the saved reading position is narrated — the very sentence at the top of the page you stopped on when the
+  // reader saved it (readingSpot.ts), else the whole-book fraction. null while it is being worked out, {s: null}
+  // when there is nothing to map.
+  const [readingSpot, setReadingSpot] = useState<{ s: number | null } | null>(null);
+  useEffect(() => {
+    setReadingSpot(null);
+    const ebookId = book ? (book.hasEbook ? itemId : book.pairedItemId) : null;
+    if (!book || !ebookId || !readAlong.map) return;
+    let cancelled = false;
+    audioTimeOfSavedReading(readAlong.map, ebookId, book.ebookProgress).then((s) => {
+      if (!cancelled) setReadingSpot({ s });
+    });
+    return () => { cancelled = true; };
+  }, [book, itemId, readAlong.map]);
+  const readingAheadS = readingSpot?.s ?? null;
+
   useEffect(() => {
     if (autoResumedRef.current || explicitJumpRef.current) return;
-    if (!book || !session || !readAlong.map) return;
+    if (!book || !session || !readAlong.map || !readingSpot) return;
     autoResumedRef.current = true; // decide now, whichever way — never re-run
     if (!(book.hasEbook || book.pairedItemId) || book.ebookProgress <= book.audioProgress) return;
-    const mappedS = timeAtProgression(readAlong.map, book.ebookProgress);
+    const mappedS = readingSpot.s;
     if (mappedS === null || mappedS - positionRef.current <= 20) return; // not meaningfully ahead
     seekTo(mappedS);
     setResumeNotice(`Resumed from your reading progress — ${formatTime(mappedS)}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readAlong.map, book, session]);
+  }, [readAlong.map, book, session, readingSpot]);
 
   function seekTo(targetS: number) {
     if (!session) return;
@@ -377,14 +403,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // This item's own ebook if it has one, otherwise the paired item that
     // supplied the ebook side of the read-along map (see pairedItemId).
     const readItemId = book?.hasEbook ? itemId : book?.pairedItemId ?? itemId;
-    navigate(`/read/${readItemId}?atProgression=${p}`);
+    // atTime lets the reader open on the very sentence being spoken; atProgression is its fallback.
+    navigate(`/read/${readItemId}?atProgression=${p}&atTime=${positionRef.current.toFixed(1)}`);
   }
 
   function jumpToReadingPosition() {
-    if (!book || !readAlong.map) return;
-    const target = timeAtProgression(readAlong.map, book.ebookProgress);
-    if (target === null) return;
-    seekTo(target);
+    if (readingAheadS === null) return;
+    seekTo(readingAheadS);
   }
 
   function cycleSpeed() {
@@ -476,6 +501,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     seekTo,
     skip,
     skipChapter,
+    chapters,
+    readingAheadS,
     chapterLabel,
     chapterLabels,
     togglePlayPause,

@@ -362,7 +362,16 @@ Mirrors `codexaudio`'s `AlignmentRepository` interface:
    `p`/`c0` to find "what audio second corresponds to reading position N" —
    both directions are needed (audio→text for highlighting while listening,
    text→audio for "jump to audio" from wherever you're reading).
-5. Cross-format position: **furthest-progress-wins** between the two
+5. **Page-exact hand-over** (added 2026-10). A page's `progression` is a position in the *rendered* chapter, not in
+   its characters, so mapping it alone lands tens of seconds off. The reader therefore also saves the first text on the
+   page next to the locator, as `pageStart` (≤160 chars, Webdex: top-level key of the locator JSON in `ebookLocation`;
+   Audex: in its local Readium locator). Reading → audio finds the map sentence whose text begins with `pageStart`
+   (within the same chapter, nearest to the progression; quotes, dashes, case and spacing folded; a short first
+   sentence is read on into the next ones) and starts the audio at its `t0`; no `pageStart`, or no match, falls back to
+   `progression` → character → time. Audio → reading opens the chapter on the sentence being narrated (its text, with
+   the character depth as fallback). A server that echoes our own upload back (same %, a coarser location) must not
+   replace the saved exact locator.
+6. Cross-format position: **furthest-progress-wins** between the two
    editions of the same work, same principle as Codex's own cross-edition
    sync (§2) — don't let the map turn into a second, competing source of
    truth for "where you are"; it's a *lookup table* between two already-

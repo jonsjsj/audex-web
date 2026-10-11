@@ -19,8 +19,8 @@ the same cases in both repos), applied top to bottom of the list:
 1. A title that is front/back matter (case-insensitive, whole title): opening/end credits, credits, title page,
    copyright, dedication, contents / table of contents, epigraph, foreword, preface, prologue, introduction,
    map(s), acknowledg(e)ments, about the author, author's note, epilogue, afterword, glossary, cast (of
-   characters), also by…, excerpt…, preview…, appendix…, the end, "Part One/Two/…/N/IV" → label is the title,
-   no number.
+   characters), also by…, excerpt…, preview…, appendix…, the end, thank you…, summary / recap ("Book 12 Summary",
+   "Series Recap"), outro, closing credits, "Part One/Two/…/N/IV" → label is the title, no number.
 2. A title that already names a number — `Chapter 33`, `Chapter 33: Name`, `Chapter 33 - Name`, `Ch. 33`,
    `Chapter Thirty-Three`, `33. Name`, `33: Name`, `33` → that number; the rest is the name.
 3. Any other title (`The Gate`) → the next number after the previous chapter (starts at 1; continues from an
@@ -43,6 +43,25 @@ service cuts a short clip at the start of every chapter, has Whisper transcribe 
   exactly as before.
 * Front/back matter heard in the audio (`prologue`, `epilogue`, `intro`, `opening_credits`, `end_credits`…) gets no number.
 * Audex keeps the labels with a downloaded book, so they are there offline; Webdex asks Codex when a book is opened.
+
+## Named from the ebook (when the file only counts)
+
+Some audiobooks list nothing but `Chapter 1 … Chapter 78` (or `Track 04`, `001`). That list also counts the credits and
+the book summary, so the book's chapter 1 shows as Chapter 3 — and no rule over those titles can fix it. When the book
+has an ebook and a read-along map, the chapters are instead **the ebook's own table of contents, placed where the map
+says each one is spoken**:
+
+* Only when **every** title merely counts (`chapter|track|ch.` + number, or a bare number) — a list with real names is
+  never touched — and **not** when Codex heard more than half of the chapters (the narrator's own words win).
+* Each contents entry whose chapter file has at least 1,500 characters of text becomes a chapter starting at the map's
+  time for that file's first character. Entries starting within a second of each other (copyright, contents and a
+  recap in one stretch of audio) collapse into one, named after the longest. Text after the last narrated sentence
+  (appendices) is dropped; audio before the first chapter becomes "Opening Credits". Fewer than 3 chapters found →
+  nothing changes.
+* The contents' names then go through the rules above (`1. A Person the Other Used to Know` → `Chapter 1: A Person the
+  Other Used to Know`; `Book 12 Summary`, `Thank you for reading…` stay unnumbered).
+* Audex needs the ebook downloaded; Webdex reads the contents from the server. Without an ebook, a map, or on any
+  failure, the chapters stay exactly as the file has them.
 
 ## Skipping chapters
 

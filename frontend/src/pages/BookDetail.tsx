@@ -1,5 +1,6 @@
-import { labelChaptersFor } from "../lib/chapters";
 import { useHeardChapters } from "../lib/useHeardChapters";
+import { useBookChapters, wantsEbookNames } from "../lib/useBookChapters";
+import { useReadAlong } from "../lib/useReadAlong";
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
@@ -239,6 +240,16 @@ export default function BookDetail() {
   const [reload, setReload] = useState(0);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const heardChapters = useHeardChapters(itemId);
+  // A file that only counts its chapters gets the ebook's own names, placed by the read-along map (docs/CHAPTERS.md).
+  const ebookId = book ? (book.hasEbook ? itemId : book.pairedItemId) : null;
+  const namesFromEbook = !!book && !!ebookId && book.numAudioFiles > 0 && wantsEbookNames(book.chapters, heardChapters);
+  const readAlong = useReadAlong(itemId, namesFromEbook);
+  const { chapters: shownChapters, labels: chapterLabels } = useBookChapters({
+    chapters: book?.chapters ?? [],
+    heard: heardChapters,
+    ebookItemId: namesFromEbook ? ebookId : null,
+    map: readAlong.map,
+  });
 
   useEffect(() => {
     if (!itemId) return;
@@ -460,9 +471,9 @@ export default function BookDetail() {
       {book.chapters.length > 0 && (
         <div className="book-detail-section">
           <div className="l">CHAPTERS</div>
-          {labelChaptersFor(book.chapters.map((c) => ({ title: c.title, startS: c.startS })), heardChapters).map((c, i) => (
-            <div key={book.chapters[i].id} className="player-chapter-row" style={{ cursor: "default" }}>
-              <span>{c.label}</span>
+          {shownChapters.map((c, i) => (
+            <div key={c.id} className="player-chapter-row" style={{ cursor: "default" }}>
+              <span>{chapterLabels[i].label}</span>
             </div>
           ))}
         </div>

@@ -23,6 +23,7 @@ const MATTER = new RegExp(
     "(?:table\\s+of\\s+)?contents|epigraph|foreword|preface|prologue|introduction|intro|maps?|" +
     "acknowledge?ments?|about\\s+the\\s+authors?|authors?'?s?\\s+notes?|epilogue|afterword|glossary|" +
     "cast(?:\\s+of\\s+characters)?|also\\s+by\\b.*|excerpt\\b.*|preview\\b.*|appendix\\b.*|the\\s+end|" +
+    "thank\\s+you\\b.*|(?:book\\s+\\d+\\s+)?(?:summary|recap)|(?:series\\s+)?recap|outro|closing\\s+credits|" +
     "part\\s+(?:\\d+|[ivxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\\b.*)?)\\s*[.:!]?$",
   "i",
 );
@@ -110,6 +111,24 @@ export function labelChaptersFor(
     if (!h || (h.source !== "heard" && h.source !== "inferred") || h.kind === "unknown" || !h.label) return b;
     return { number: h.kind === "chapter" ? h.number : null, name: h.name ?? "", label: h.label, explicit: true };
   });
+}
+
+/** How many of [chapters] have a heard (narrator-announced) name — the same test [labelChaptersFor] applies. */
+export function countHeard(chapters: { startS: number }[], heard: HeardLike[] | null | undefined): number {
+  if (!heard || heard.length === 0) return 0;
+  return chapters.filter((c, i) => {
+    const h = heard[i] && Math.abs(heard[i].start - c.startS) < 2 ? heard[i] : heard.find((x) => Math.abs(x.start - c.startS) < 2);
+    return !!h && (h.source === "heard" || h.source === "inferred") && h.kind !== "unknown" && !!h.label;
+  }).length;
+}
+
+// A chapter list that is only counting: "Chapter 3", "Track 04", "12".
+const GENERIC_TITLE = /^(?:chapter|track|ch\.?)?\s*0*\d+$/i;
+
+/** True when every title merely counts ("Chapter 1 … Chapter 78", "001"). Such a list also counts the credits and the
+ *  book summary, so it is off by a few — the ebook's contents name the real chapters (see [titledChapterStarts]). */
+export function isGenericChapterList(titles: string[]): boolean {
+  return titles.length > 0 && titles.every((t) => GENERIC_TITLE.test(t.trim()));
 }
 
 /** Labels for an ebook's table of contents. Unlike an audiobook's chapter list, an ebook's contents already

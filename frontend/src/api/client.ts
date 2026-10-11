@@ -348,8 +348,9 @@ export const api = {
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
     request<{ locator: ReadiumLocator | null; progress?: number }>(`/api/read/${itemId}/position`),
-  saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }) =>
-    request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body) }),
+  /** [keepalive] lets the request finish after the page is gone (closing the tab, leaving the reader). */
+  saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }, opts?: { keepalive?: boolean }) =>
+    request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body), keepalive: opts?.keepalive }),
   discardReadProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "DELETE" }),
 
