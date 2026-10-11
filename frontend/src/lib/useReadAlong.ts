@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ReadAlongStatus, SyncMap } from "../api/client";
 
 const POLL_MS = 4000;
@@ -20,6 +20,8 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
   // start it again — otherwise the page would say "building" forever and never
   // notice it had finished or failed.
   const [pollRun, setPollRun] = useState(0);
+  // Bumped to fetch the map again (the person picked another map version).
+  const [mapRun, setMapRun] = useState(0);
 
   useEffect(() => {
     if (!itemId || !enabled) return;
@@ -57,7 +59,13 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
     api.readAlongMap(itemId).then(setMap).catch(() => {
       mapFetchedRef.current = false; // let a transient fetch failure retry on the next status tick
     });
-  }, [itemId, status]);
+  }, [itemId, status, mapRun]);
+
+  /** The map in use changed (picked another version): load it again. */
+  const reloadMap = useCallback(() => {
+    mapFetchedRef.current = false;
+    setMapRun((n) => n + 1);
+  }, []);
 
   async function requestBuild(ebookItemId?: string) {
     if (!itemId) return;
@@ -77,5 +85,5 @@ export function useReadAlong(itemId: string | undefined, enabled: boolean) {
     }
   }
 
-  return { status, map, error, requestBuild };
+  return { status, map, error, requestBuild, reloadMap };
 }

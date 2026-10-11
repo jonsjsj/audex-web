@@ -204,8 +204,32 @@ export interface ArrStatus {
   error?: string;
 }
 
+/** One read-along map of a book; `createdAt` is UTC ISO (format it with lib/dates). */
+export interface ReadAlongMapVersion {
+  id: string;
+  createdAt: string | null;
+  source: string | null; // "initial" | "transcribe" | "realign"
+  model: string | null;
+  device: string | null;
+  anchors: number | null;
+  durationS: number | null;
+  size: number | null;
+  requestedBy: string | null;
+  isDefault: boolean;
+  isMine: boolean;
+}
+
+export interface ReadAlongMaps {
+  default: string | null;
+  mine: string | null;
+  versions: ReadAlongMapVersion[];
+  canManage: boolean;
+}
+
 export interface ReadAlongStatus {
   configured: boolean;
+  /** Present while a NEW map is being built next to the one that exists. */
+  rebuild?: { state: string | null; progress: number | null } | null;
   available: boolean;
   state: string; // "none" | "queued" | "downloading" | "extracting" | "transcribing" | "aligning" | "done" | "error"
   progress: number; // 0..1
@@ -367,6 +391,20 @@ export const api = {
       body: JSON.stringify({ ebookItemId: ebookItemId ?? null }),
     }),
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
+  /** Every map of the book with its date, your pick and the default. */
+  readAlongMaps: (itemId: string) => request<ReadAlongMaps>(`/api/readalong/${itemId}/maps`),
+  /** Use one map just for you (its id), or null to follow the default again. */
+  readAlongChooseMap: (itemId: string, version: string | null) =>
+    request<{ ok: true; mine: string | null }>(`/api/readalong/${itemId}/maps/choice`, {
+      method: "PUT",
+      body: JSON.stringify({ version }),
+    }),
+  /** Another map next to the existing ones: "realign" (seconds) or "transcribe" (hours). */
+  readAlongNewMap: (itemId: string, kind: "realign" | "transcribe", ebookItemId?: string, title?: string) =>
+    request<{ ok: boolean; state?: string }>(`/api/readalong/${itemId}/maps/new`, {
+      method: "POST",
+      body: JSON.stringify({ kind, ebookItemId: ebookItemId ?? null, title: title ?? null }),
+    }),
   /** Chapter names + numbers heard from the narration (Codex); `chapters` is empty until a book has been listened to. */
   heardChapters: (itemId: string) => request<{ chapters: HeardChapter[] }>(`/api/chapters/${itemId}/heard`),
 

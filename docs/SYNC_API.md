@@ -205,7 +205,16 @@ GET  {codexUrl}/audex/align/health
 GET  {codexUrl}/audex/align/map/{absItemId}       → the map JSON, or 404
 GET  {codexUrl}/audex/align/status/{absItemId}    → {configured, available, state, progress, eta_seconds}
 POST {codexUrl}/audex/align/build/{absItemId}     → kick off a build; body: {ebook_item_id?}
+GET  {codexUrl}/audex/align/maps/{absItemId}      → every map of the book: {default, mine, can_manage, versions:[{id, created_at (UTC ISO), source, model, device, anchors, duration_s, size, requested_by, is_default, is_mine}]}
+PUT  {codexUrl}/audex/align/maps/{absItemId}/choice → {version: id | null}: YOUR pick for this book (null = follow the default); needs a Codex key
+POST {codexUrl}/audex/align/maps/{absItemId}/new   → {kind: "realign" | "transcribe", ebook_item_id?, requestedBy?, title?}: another map next to the existing ones
 ```
+
+**Map versions.** Every map built for a book is kept with the date it was made, and one is the default for everybody.
+`GET …/map/{id}` serves the caller's own pick when they have one (keyed by their Codex key), else the default, and names it
+in the `X-Map-Version` header. `realign` rebuilds from the transcript saved when the book was first listened to (seconds);
+`transcribe` listens to the audio again (hours of GPU); neither replaces the default. Only a Codex admin can delete a map or
+change the default (Codex → Admin → Read-along maps). Audex Web sends the signed-in person's linked Codex key on every call.
 
 **These routes are PUBLIC — no Codex auth token required.** Codex fetches the
 book itself using its own stored ABS connection (any enabled one; the

@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { usePlayback, formatTime } from "../lib/PlaybackContext";
 import { madeAt, parseTitle } from "../lib/bookmarkTitle";
 import { chapterIndexAt } from "../lib/chapters";
+import ReadAlongMaps from "../components/ReadAlongMaps";
 
 const SKIP_S = 30;
 // Decorative, not audio-derived — mirrors the native app's own fixed
@@ -323,6 +324,18 @@ export default function Player() {
           <span className="l">GO TO</span>
         </button>
       </div>
+
+      {readAlong.map && (book!.hasEbook || book!.pairedItemId) && urlItemId && (
+        <details className="player-maps">
+          <summary>Read-along maps</summary>
+          <ReadAlongMaps
+            itemId={urlItemId}
+            ebookItemId={book!.hasEbook ? undefined : book!.pairedItemId ?? undefined}
+            title={book!.title}
+            onChanged={readAlong.reloadMap}
+          />
+        </details>
+      )}
 
       {(book!.hasEbook || book!.pairedItemId) && !readAlong.map && (
         // The switch-to-reading action itself now lives in the hero (always
