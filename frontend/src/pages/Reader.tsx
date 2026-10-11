@@ -7,6 +7,7 @@ import { useShell } from "../components/Shell";
 import { labelTocTitles } from "../lib/chapters";
 import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
+import ReadAlongMaps from "../components/ReadAlongMaps";
 import {
   clampFont,
   DEFAULT_APPEARANCE,
@@ -1260,6 +1261,14 @@ export default function Reader() {
                       : "Start the audiobook (🎧 Listen) and the page will follow it."
                     : "Off — the page stays where you leave it."}
                 </p>
+                {readAlongAnchorId && (
+                  <ReadAlongMaps
+                    itemId={readAlongAnchorId}
+                    ebookItemId={hasAudio ? undefined : itemId}
+                    title={bookDetail?.title}
+                    onChanged={readAlong.reloadMap}
+                  />
+                )}
               </>
             ) : raOff ? (
               <p className="reader-ra-line">

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, Book } from "../api/client";
 import { useShell } from "../components/Shell";
 import { yearOf } from "../lib/groupSort";
+import { formatDay } from "../lib/dates";
 
 // A book you own but haven't opened yet — the "unread" shelf. Started-and-
 // unfinished books belong to "In progress", finished ones to neither.
@@ -70,6 +71,16 @@ function filterBooks(books: Book[], key: FilterKey): Book[] {
     default:
       return books;
   }
+}
+
+/** The date behind the current sort, in the browser's regional format ("Added 11.10.2026"; release is a year only). */
+function dateNoteFor(b: Book, sort: SortKey): string | undefined {
+  if (sort === "added") {
+    const d = formatDay(b.addedAt);
+    return d ? `Added ${d}` : undefined;
+  }
+  if (sort === "released") return b.publishedYear ? `Released ${b.publishedYear}` : undefined;
+  return undefined;
 }
 
 function sortBooks(books: Book[], key: SortKey): Book[] {
@@ -211,7 +222,7 @@ export default function Library() {
           {continueBooks.length > 0 && <div className="lib-section-label">All books</div>}
           <div className="lib-grid">
             {sortedBooks.map((b) => (
-              <BookCard key={b.id} book={b} onNavigate={navigate} aligned={alignMap[b.id]} onRequestAlign={requestAlign} />
+              <BookCard key={b.id} book={b} onNavigate={navigate} aligned={alignMap[b.id]} onRequestAlign={requestAlign} dateNote={dateNoteFor(b, sort)} />
             ))}
           </div>
         </section>
@@ -233,12 +244,15 @@ export function BookCard({
   quickResume,
   aligned,
   onRequestAlign,
+  dateNote,
 }: {
   book: Book;
   onNavigate: (href: string) => void;
   quickResume?: boolean;
   aligned?: boolean;
   onRequestAlign?: (book: Book) => void;
+  /** "Added 11.10.2026" / "2026": the date behind the sort the grid is in (regional format). */
+  dateNote?: string;
 }) {
   const hasAudio = b.numAudioFiles > 0;
   // ABS sometimes catalogs a book's audiobook and ebook as two separate
@@ -269,6 +283,7 @@ export function BookCard({
         <div className="lib-title">{b.title}</div>
         {b.author && <div className="lib-author">{b.author}</div>}
         {b.series && <div className="lib-series">{b.series}</div>}
+        {dateNote && <div className="lib-date">{dateNote}</div>}
         <div className="lib-format-icons" aria-hidden>
           <span className={`lib-format-icon ${hasAudioEffective ? "on" : ""}`} title="Audiobook">
             🎧

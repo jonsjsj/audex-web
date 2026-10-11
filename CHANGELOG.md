@@ -7,6 +7,20 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [Unreleased]
+
+### Added
+- **Read-along maps, with dates.** The reader's Read-along panel and the player list every map built for the book with
+  the day and time it was made (in your browser's regional format), which one is in use and which is the default. Use
+  another map just for yourself, go back to the default, or ask for a new one: "Re-align" takes seconds (from the saved
+  transcript), "Re-transcribe" listens to the audio again (hours). A new map is added next to the others and never
+  replaces them; deleting old maps and choosing the default for everyone is done in Codex by an admin.
+- **Dates in the library.** Sorted by "Recently added", each book shows when it was added; sorted by "Release date", its year.
+
+### Fixed
+- Read-along calls now carry your linked Codex key (Settings → Codex). Codex requires it to start a build and, in its
+  strict mode, for every read-along call, so building a map from Audex Web was being refused.
+
 ## [0.7.9] - 2026-10-11
 
 ### Fixed
