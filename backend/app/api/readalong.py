@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.connections import connections_for_library, resolve
 from app.api.deps import get_current_identity
 from app.api.library import _iter_books_paired
-from app.core import abs_client
+from app.core import abs_client, activity
 from app.core.abs_client import AbsError
 from app.core.config import align_gateway_url, settings
 from app.core.database import Identity, get_db
@@ -151,6 +151,11 @@ async def status(
             "message": err.get("message"),
             "hint": err.get("hint"),
         }
+        await activity.record(
+            identity.id, "read-along", "Read-along map failed", False,
+            f"while {err.get('stage') or 'working'}: {err.get('message') or 'unknown error'}"
+            + (f" - {err['hint']}" if err.get("hint") else ""),
+            dedupe_s=900)
     return out
 
 
@@ -167,7 +172,9 @@ async def build(
     if not _configured():
         raise HTTPException(400, "Read-along isn't configured on this server (no Codex instance set).")
     _conn, abs_id = await resolve(identity, db, item_id)
-    payload: dict = {}
+    # Who asked — shown on the Align dashboard's job list ("Audex Web · jonsj").
+    who = identity.abs_username or identity.display_name or identity.email or "someone"
+    payload: dict = {"requestedBy": f"Audex Web · {who}"}
     if body.ebookItemId:
         # An ebook pair id may itself be namespaced; strip to the real abs id.
         _c2, ebook_abs = await resolve(identity, db, body.ebookItemId)
@@ -175,15 +182,24 @@ async def build(
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(f"{align_gateway_url()}/build/{abs_id}", json=payload)
-    except httpx.HTTPError:
+    except httpx.HTTPError as e:
+        why = activity.describe_error(e)
+        await activity.record(identity.id, "read-along", "Build read-along map", False,
+                              f"couldn't reach Codex's read-along service: {why}")
         raise HTTPException(502, "Couldn't reach the read-along service.")
     if r.status_code != 200:
         # Forward Codex's own detail (e.g. "No Audiobookshelf connection is
         # set up in Codex.") rather than a generic message — it's the one
         # piece of information the user can actually act on.
         detail = r.json().get("detail") if r.headers.get("content-type", "").startswith("application/json") else None
+        await activity.record(identity.id, "read-along", "Build read-along map", False,
+                              detail or activity.describe_status(r.status_code))
         raise HTTPException(502, detail or "Couldn't start the read-along build.")
-    return r.json()
+    result = r.json()
+    await activity.record(identity.id, "read-along", "Build read-along map", True,
+                          "already built" if result.get("state") == "done" else
+                          f"started ({result.get('state') or 'queued'}) - progress shows on the book")
+    return result
 
 
 @router.get("/{item_id}/map")

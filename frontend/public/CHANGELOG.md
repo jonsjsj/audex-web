@@ -7,6 +7,23 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.8] - 2026-10-11
+
+### Added
+- **Chapter names and numbers now come from what the narrator says**, when Codex has listened to the book. The player,
+  the mini player, the lock-screen card and the book page show the real "Chapter 1: Suicide Kings" instead of a number
+  guessed from the file ("Chapter 2: Salvation's Reach - Chapter 1"); Prologue, Epilogue and the credits are named and
+  unnumbered. Books Codex hasn't listened to yet look exactly as before. See `docs/CHAPTERS.md`.
+
+## [0.7.7] - 2026-10-08
+
+### Fixed
+- **The ebook reader never showed which chapter you were in.** The chapter name lived in the title bar, which folds
+  away until the mouse is over it, so while reading it was invisible. It now stays on screen in the thin strip at
+  the top of the page, and reads **"Chapter 33: The Gate"** (same wording as the audio player) when the book's own
+  contents name the number. Front matter and unnumbered entries ("Cover", "The Gate") are shown as the book has
+  them rather than being given a number the book never gave them.
+
 ## [0.7.6] - 2026-10-08
 
 ### Changed

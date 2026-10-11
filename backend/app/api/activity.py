@@ -104,11 +104,44 @@ async def diagnostics(
         checks.append(await _timed("Codex · your account", codex_token_check()))
 
         async def align_check():
-            r = await _get(f"{align_gateway_url()}/status/diagnostic-ping")
+            """Is read-along READY, and if not, why not? Codex's /health reports whether a word-sync
+            server is configured, whether it answers, and what it runs on."""
+            r = await _get(f"{align_gateway_url()}/health")
+            if r.status_code == 404:
+                # An older Codex without the health route: fall back to "does the gateway answer".
+                r = await _get(f"{align_gateway_url()}/status/diagnostic-ping")
+                if r.status_code != 200:
+                    raise _Failed(activity.describe_status(r.status_code))
+                return "read-along gateway answers (this Codex is too old to say whether the alignment service is up)"
             if r.status_code != 200:
                 raise _Failed(activity.describe_status(r.status_code))
-            return "read-along service answers"
-        checks.append(await _timed("Codex · read-along service", align_check()))
+            h = r.json() or {}
+            if not h.get("configured"):
+                raise _Failed("Codex has no word-sync server set (Codex → Admin → Configuration → Audex word-sync), so read-along can't be built.")
+            if not h.get("ok"):
+                raise _Failed("Codex is set up for read-along but the alignment service isn't answering — it may be down or restarting (check the Align dashboard).")
+            bits = []
+            device = h.get("device")
+            if device:
+                bits.append(f"{device} (slow — hours per book)" if device == "cpu" else device)
+            if h.get("maps") is not None:
+                bits.append(f"{h['maps']} map{'' if h['maps'] == 1 else 's'} built")
+            bits.append(f"busy — {h['active']} building" if h.get("active") else "idle")
+            return "ready · " + " · ".join(bits)
+        checks.append(await _timed("Codex · read-along", align_check()))
+
+        async def arr_check():
+            """The book downloader is optional: not connected is informational, not a failure."""
+            r = await _get(f"{base}/audex/arr/config")
+            if r.status_code == 404:
+                return "this Codex has no book-downloader gateway (older version) — the Monitor & download button stays hidden"
+            if r.status_code != 200:
+                raise _Failed(activity.describe_status(r.status_code))
+            d = r.json() or {}
+            if not d.get("configured"):
+                return "no Chaptarr/Readarr connected in Codex — the Monitor & download button stays hidden"
+            return f"{d.get('service') or 'book downloader'} connected — Monitor & download is available"
+        checks.append(await _timed("Codex · book downloader", arr_check()))
 
     async def github_check():
         r = await _get(f"https://raw.githubusercontent.com/{settings.UPDATE_REPO}/main/VERSION")

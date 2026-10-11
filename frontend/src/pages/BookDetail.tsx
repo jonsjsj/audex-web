@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
 import { useShell } from "../components/Shell";
+import ArrMonitor from "../components/ArrMonitor";
 
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
@@ -352,6 +353,7 @@ export default function BookDetail() {
                 {book.ebookProgress > 0.001 ? "Resume reading" : "Read"}
               </button>
             )}
+            <ArrMonitor itemId={book.id} />
             <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setEditing((v) => !v)}>
               Edit details
             </button>

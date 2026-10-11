@@ -4,6 +4,7 @@ import { HttpFetcher, Locator, LocatorLocations, Manifest, Publication } from "@
 import { EpubNavigator, EpubNavigatorListeners } from "@readium/navigator";
 import { api, BookDetail } from "../api/client";
 import { useShell } from "../components/Shell";
+import { labelTocTitles } from "../lib/chapters";
 import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
 import {
@@ -859,10 +860,14 @@ export default function Reader() {
     });
   }
   const shownFraction = scrub ?? fraction;
-  // The chapter name for the header comes from the table of contents, not from
-  // the locator Readium reports: a locator we built ourselves (a chapter-list
-  // pick, the slider, a resume from a saved %) carries no title of its own.
-  const shownChapter = (activeToc >= 0 ? toc[activeToc]?.title : null) ?? chapterTitle;
+  // The chapter name comes from the table of contents, not from the locator
+  // Readium reports: a locator we built ourselves (a chapter-list pick, the
+  // slider, a resume from a saved %) carries no title of its own. A title that
+  // names its number reads "Chapter 33: The Gate", like the audio player's
+  // chapter line (lib/chapters.ts); anything else is shown as the book has it.
+  const tocTitle = activeToc >= 0 ? toc[activeToc]?.title : null;
+  const labelled = (tocTitle ? labelTocTitles([tocTitle])[0] : null) ?? chapterTitle;
+  const shownChapter = labelled && labelled !== "Untitled" ? labelled : null; // flattenToc's stand-in for a blank title
 
   // Read-along (word sync): what to show for this book. Only books that have an
   // audiobook edition — its own, or a paired one — can ever be aligned.
@@ -887,8 +892,11 @@ export default function Reader() {
     <div className="reader-wrap" tabIndex={-1}>
       {/* Top bar: folds away like the bottom controls — a thin strip stays, the title bar appears when the
           mouse is over it (or focus is inside it, a list is open, or the strip was tapped). */}
-      <div className={`reader-top ${topPinned ? "open" : ""}`}>
+      <div className={`reader-top ${topPinned ? "open" : ""} ${shownChapter ? "has-chapter" : ""}`}>
       <div className="reader-top-handle" aria-hidden onClick={() => setTopPinned((v) => !v)} />
+      {/* Where you are, always on screen while reading — the title bar below (which also names the chapter)
+          only slides in on hover, so on its own you'd never see the chapter you're in. */}
+      {shownChapter && <div className="reader-top-chapter">{shownChapter}</div>}
       <header className="reader-head">
         <button className="reader-back" onClick={() => navigate("/")}>
           ← Library

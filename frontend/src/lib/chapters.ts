@@ -13,6 +13,9 @@ export interface LabeledChapter {
   name: string;
   /** What to show: "Chapter 33: The Gate", "Chapter 33", or the plain title for front/back matter. */
   label: string;
+  /** True when the title itself named the number ("Chapter 33: …", "33. …"); false when it was assigned
+   *  by counting, and for front/back matter. */
+  explicit: boolean;
 }
 
 const MATTER = new RegExp(
@@ -48,7 +51,7 @@ export function labelChapters(titles: string[]): LabeledChapter[] {
   let next = 1;
   return titles.map((raw) => {
     const title = raw.trim();
-    if (MATTER.test(title)) return { number: null, name: title, label: title };
+    if (MATTER.test(title)) return { number: null, name: title, label: title, explicit: false };
     let number: number | null = null;
     let name = title;
     const m = CHAPTER_N.exec(title);
@@ -71,9 +74,10 @@ export function labelChapters(titles: string[]): LabeledChapter[] {
         name = (n[2] ?? "").trim();
       }
     }
+    const explicit = number !== null;
     if (number === null) number = next; // an unnumbered chapter: the next number in the book's own count
     next = number + 1;
-    return { number, name, label: name ? `Chapter ${number}: ${name}` : `Chapter ${number}` };
+    return { number, name, label: name ? `Chapter ${number}: ${name}` : `Chapter ${number}`, explicit };
   });
 }
 
@@ -104,8 +108,16 @@ export function labelChaptersFor(
     const at = chapters[i].startS;
     const h = heard[i] && Math.abs(heard[i].start - at) < 2 ? heard[i] : heard.find((x) => Math.abs(x.start - at) < 2);
     if (!h || (h.source !== "heard" && h.source !== "inferred") || h.kind === "unknown" || !h.label) return b;
-    return { number: h.kind === "chapter" ? h.number : null, name: h.name ?? "", label: h.label };
+    return { number: h.kind === "chapter" ? h.number : null, name: h.name ?? "", label: h.label, explicit: true };
   });
+}
+
+/** Labels for an ebook's table of contents. Unlike an audiobook's chapter list, an ebook's contents already
+ *  are the book's own — so only a title that itself names its number ("Chapter 33 The Gate", "33. The Gate")
+ *  is reworded to "Chapter 33: The Gate"; front/back matter and anything else ("Cover", "The Gate") is shown
+ *  as the book has it, rather than counting a number the book never gave it. */
+export function labelTocTitles(titles: string[]): string[] {
+  return labelChapters(titles).map((l, i) => (l.explicit ? l.label : titles[i].trim()));
 }
 
 /** Index of the chapter playing at [positionS] (the last one that has started), or -1 with no chapters. */

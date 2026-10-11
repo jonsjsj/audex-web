@@ -190,6 +190,20 @@ export interface UserPrefs {
   useCodexMeta?: boolean;
 }
 
+/** Where a book stands in Codex's connected book downloader (Chaptarr/Readarr) — see /api/arr. */
+export interface ArrStatus {
+  configured: boolean;
+  service: string | null;
+  present: boolean;
+  monitored: boolean;
+  audiobook_monitored?: boolean;
+  ebook_monitored?: boolean;
+  has_files?: boolean;
+  title?: string;
+  author?: string;
+  error?: string;
+}
+
 export interface ReadAlongStatus {
   configured: boolean;
   available: boolean;
@@ -354,6 +368,15 @@ export const api = {
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
   /** Chapter names + numbers heard from the narration (Codex); `chapters` is empty until a book has been listened to. */
   heardChapters: (itemId: string) => request<{ chapters: HeardChapter[] }>(`/api/chapters/${itemId}/heard`),
+
+  // Monitor & download via Codex's connected Chaptarr/Readarr. arrConfig gates the whole feature.
+  arrConfig: () => request<{ configured: boolean; service: string | null }>("/api/arr/config"),
+  arrStatus: (itemId: string) => request<ArrStatus>(`/api/arr/${itemId}/status`),
+  arrMonitor: (itemId: string, fmt: "audiobook" | "ebook" | "both" = "both") =>
+    request<{ ok: boolean; message?: string; service?: string }>(`/api/arr/${itemId}/monitor`, {
+      method: "POST",
+      body: JSON.stringify({ fmt }),
+    }),
 
   // The shipped changelog file (served from the SPA's static root, not /api).
   // Raw text — parsed client-side for the Settings About panel.
