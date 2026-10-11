@@ -7,7 +7,7 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
-## [Unreleased]
+## [0.8.0] - 2026-10-11
 
 ### Added
 - **Read-along maps, with dates.** The reader's Read-along panel and the player list every map built for the book with
