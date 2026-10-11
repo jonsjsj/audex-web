@@ -7,6 +7,14 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.7.8] - 2026-10-11
+
+### Added
+- **Chapter names and numbers now come from what the narrator says**, when Codex has listened to the book. The player,
+  the mini player, the lock-screen card and the book page show the real "Chapter 1: Suicide Kings" instead of a number
+  guessed from the file ("Chapter 2: Salvation's Reach - Chapter 1"); Prologue, Epilogue and the credits are named and
+  unnumbered. Books Codex hasn't listened to yet look exactly as before. See `docs/CHAPTERS.md`.
+
 ## [0.7.7] - 2026-10-08
 
 ### Fixed

@@ -4,7 +4,8 @@ import { api, Bookmark, BookDetail, PlaySession } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
 import { progressionAt, timeAtProgression } from "./syncMap";
 import { tagTitle } from "./bookmarkTitle";
-import { chapterIndexAt, labelChapters, nextChapterStart, previousChapterStart } from "./chapters";
+import { chapterIndexAt, labelChaptersFor, LabeledChapter, nextChapterStart, previousChapterStart } from "./chapters";
+import { useHeardChapters } from "./useHeardChapters";
 
 const SYNC_INTERVAL_MS = 15_000;
 export const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
@@ -66,6 +67,8 @@ interface PlaybackState {
   skipChapter: (direction: 1 | -1) => void;
   /** "Chapter 33: The Gate" for the chapter playing now (null with no chapters). */
   chapterLabel: string | null;
+  /** Every chapter's number/name/label — what the narrator said when Codex has listened to the book, else from the titles. */
+  chapterLabels: LabeledChapter[];
   togglePlayPause: () => void;
   cycleSpeed: () => void;
   cycleSleep: () => void;
@@ -135,7 +138,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // it directly — positionS changes on every timeupdate (several times a
   // second), and an effect keyed on it would tear down/recreate the interval
   // that often, so the 15s sync would never actually survive to fire.
-  const chapterLabels = useMemo(() => labelChapters((session?.chapters ?? []).map((c) => c.title)), [session]);
+  const heardChapters = useHeardChapters(itemId);
+  const chapterLabels = useMemo(
+    () => labelChaptersFor((session?.chapters ?? []).map((c) => ({ title: c.title, startS: c.startS })), heardChapters),
+    [session, heardChapters],
+  );
   const chapterIdx = chapterIndexAt(session?.chapters ?? [], positionS);
   const chapterLabel = chapterIdx >= 0 ? chapterLabels[chapterIdx].label : null;
 
@@ -470,6 +477,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     skip,
     skipChapter,
     chapterLabel,
+    chapterLabels,
     togglePlayPause,
     cycleSpeed,
     cycleSleep,

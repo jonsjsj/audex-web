@@ -28,6 +28,22 @@ the same cases in both repos), applied top to bottom of the list:
 
 Label: `Chapter <n>: <name>`, or `Chapter <n>` when there is no name.
 
+## Heard from the audio (preferred when available)
+
+The rules above guess from the titles in the file, which are often wrong (`Salvation's Reach - Introduction` made every
+real chapter number one too high; `Prologue: Day at the Beach` got a number). So Codex also **listens**: the align
+service cuts a short clip at the start of every chapter, has Whisper transcribe it and reads out what the narrator says
+("Chapter four. The Long Road", "Epilogue", "This is Audible…"). Codex serves the result at
+`GET /audex/chapters/{audiobookshelf item id}` as, per chapter, `{index, start, end, label, kind, number, name, source}`.
+
+* `source` is `heard` (the narrator said it), `inferred` (nobody announced it, but the neighbours leave exactly one
+  number: 3, ?, 5 → 4) or `file` (nothing was said — the file's own title, no better than the rules above).
+* The apps use the heard label only for `heard`/`inferred` chapters that sit at the same start time (±2 s) as the
+  chapter in their own list; every other chapter keeps the title-based label. A book Codex hasn't listened to yet looks
+  exactly as before.
+* Front/back matter heard in the audio (`prologue`, `epilogue`, `intro`, `opening_credits`, `end_credits`…) gets no number.
+* Audex keeps the labels with a downloaded book, so they are there offline; Webdex asks Codex when a book is opened.
+
 ## Skipping chapters
 
 Next to the 30-second skip buttons (both back and forward) there are **previous chapter** and **next chapter**

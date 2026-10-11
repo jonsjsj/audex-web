@@ -1,4 +1,5 @@
-import { labelChapters } from "../lib/chapters";
+import { labelChaptersFor } from "../lib/chapters";
+import { useHeardChapters } from "../lib/useHeardChapters";
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
@@ -237,6 +238,7 @@ export default function BookDetail() {
   const [merging, setMerging] = useState(false);
   const [reload, setReload] = useState(0);
   const [saveNote, setSaveNote] = useState<string | null>(null);
+  const heardChapters = useHeardChapters(itemId);
 
   useEffect(() => {
     if (!itemId) return;
@@ -458,7 +460,7 @@ export default function BookDetail() {
       {book.chapters.length > 0 && (
         <div className="book-detail-section">
           <div className="l">CHAPTERS</div>
-          {labelChapters(book.chapters.map((c) => c.title)).map((c, i) => (
+          {labelChaptersFor(book.chapters.map((c) => ({ title: c.title, startS: c.startS })), heardChapters).map((c, i) => (
             <div key={book.chapters[i].id} className="player-chapter-row" style={{ cursor: "default" }}>
               <span>{c.label}</span>
             </div>
