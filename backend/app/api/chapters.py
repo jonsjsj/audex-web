@@ -24,6 +24,30 @@ def _gateway() -> str:
     return f"{base}/audex/chapters" if base else ""
 
 
+async def synthesized_chapters(abs_id: str) -> list[dict]:
+    """A book Audiobookshelf has NO chapter list for (a single file with no markers) can still have chapters: Codex
+    finds them by listening for the narrator's "Chapter N" after long pauses. Returned in the shape the player and the
+    book page already use ({id, startS, endS, title}); empty when there is no Codex, no such document, or the book
+    has real chapters in Audiobookshelf (the caller only asks when it has none)."""
+    gw = _gateway()
+    if not gw:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{gw}/{abs_id}")
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    except (httpx.HTTPError, ValueError):
+        return []
+    if not data.get("synthesized"):
+        return []
+    return [
+        {"id": i, "startS": float(c.get("start") or 0.0), "endS": float(c.get("end") or 0.0), "title": c.get("label") or ""}
+        for i, c in enumerate(data.get("chapters") or [])
+    ]
+
+
 @router.get("/{item_id}/heard")
 async def heard(
     item_id: str,

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chapters import synthesized_chapters
 from app.api.connections import AbsConn, connections_for_library, list_connections, resolve, tag
 from app.api.deps import get_current_identity
 from app.core import abs_client, codex_client
@@ -408,6 +409,8 @@ async def get_item(
         {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
         for c in media.get("chapters", [])
     ]
+    if not summary["chapters"]:
+        summary["chapters"] = await synthesized_chapters(abs_id)   # no markers in the file: use the ones Codex heard
     summary.update(_book_detail_extra(item))
     # Best-effort: a book's other-format edition may be a whole separate
     # library item (see catalog_match.py) — scan every connected library for

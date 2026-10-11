@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.chapters import synthesized_chapters
 from app.api.connections import list_connections, resolve
 from app.api.deps import get_codex_token, get_current_identity
 from app.core import abs_client, activity, codex_client
@@ -35,6 +36,12 @@ async def play(
     except AbsError as e:
         raise HTTPException(502, str(e))
     tracks = session.get("audioTracks", [])
+    chapters = [
+        {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
+        for c in session.get("chapters", [])
+    ]
+    if not chapters:
+        chapters = await synthesized_chapters(abs_id)   # no markers in the file: use the ones Codex heard
     return {
         "sessionId": session["id"],
         "currentTimeS": session.get("currentTime", 0.0),
@@ -51,10 +58,7 @@ async def play(
             }
             for i, t in enumerate(tracks)
         ],
-        "chapters": [
-            {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
-            for c in session.get("chapters", [])
-        ],
+        "chapters": chapters,
     }
 
 
