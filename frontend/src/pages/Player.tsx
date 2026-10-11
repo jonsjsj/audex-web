@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { usePlayback, formatTime } from "../lib/PlaybackContext";
 import { madeAt, parseTitle } from "../lib/bookmarkTitle";
-import { chapterIndexAt, labelChapters } from "../lib/chapters";
+import { chapterIndexAt } from "../lib/chapters";
 import { timeAtProgression } from "../lib/syncMap";
 
 const SKIP_S = 30;
@@ -166,10 +166,9 @@ export default function Player() {
   }
   if (!loaded) return <p className="sub" style={{ padding: "2rem" }}>Loading…</p>;
 
-  const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, readAlong } = playback;
+  const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, readAlong, chapterLabels } = playback;
   const shown = scrubbing ?? positionS;
   const currentChapter = session!.chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
-  const chapterLabels = labelChapters(session!.chapters.map((c) => c.title));
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
   const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
   const readingAheadS = (book!.hasEbook || book!.pairedItemId) && readAlong.map ? timeAtProgression(readAlong.map, book!.ebookProgress) : null;

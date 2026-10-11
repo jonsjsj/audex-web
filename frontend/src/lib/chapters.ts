@@ -77,6 +77,37 @@ export function labelChapters(titles: string[]): LabeledChapter[] {
   });
 }
 
+/** A chapter as the chapter-listening service heard it (Codex /audex/chapters). Structural copy of api/client's
+ *  HeardChapter so this file stays free of imports. */
+export interface HeardLike {
+  start: number;
+  label: string;
+  kind: string;
+  number: number | null;
+  name: string | null;
+  source: string;
+}
+
+/** Labels for a book's chapters: what the narrator SAID wins, the file's own title fills the gaps.
+ *
+ *  [heard] comes from listening to the start of each chapter (docs/CHAPTERS.md "Heard from the audio"). An entry is
+ *  used only when the narrator really announced it (source "heard"/"inferred") and it sits at the same place as the
+ *  chapter in this list (within 2 s — a re-tagged book must not take another edition's names). Everything else keeps
+ *  the title-based label, so a book nobody has listened to yet looks exactly as before. */
+export function labelChaptersFor(
+  chapters: { title: string; startS: number }[],
+  heard: HeardLike[] | null | undefined,
+): LabeledChapter[] {
+  const base = labelChapters(chapters.map((c) => c.title));
+  if (!heard || heard.length === 0) return base;
+  return base.map((b, i) => {
+    const at = chapters[i].startS;
+    const h = heard[i] && Math.abs(heard[i].start - at) < 2 ? heard[i] : heard.find((x) => Math.abs(x.start - at) < 2);
+    if (!h || (h.source !== "heard" && h.source !== "inferred") || h.kind === "unknown" || !h.label) return b;
+    return { number: h.kind === "chapter" ? h.number : null, name: h.name ?? "", label: h.label };
+  });
+}
+
 /** Index of the chapter playing at [positionS] (the last one that has started), or -1 with no chapters. */
 export function chapterIndexAt(chapters: { startS: number }[], positionS: number): number {
   let idx = -1;

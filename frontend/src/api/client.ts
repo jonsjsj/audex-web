@@ -73,6 +73,19 @@ export interface Book {
   pairedItemId: string | null;
 }
 
+/** One chapter as heard by the chapter-listening service (see lib/chapters.ts mergeHeard). */
+export interface HeardChapter {
+  index: number;
+  start: number;
+  end: number;
+  label: string;
+  kind: string;
+  number: number | null;
+  name: string | null;
+  /** heard = the narrator said it; inferred = filled in between two heard numbers; file = nothing was said. */
+  source: "heard" | "inferred" | "file";
+}
+
 export interface BookDetail extends Book {
   chapters: Chapter[];
   description: string | null;
@@ -339,6 +352,8 @@ export const api = {
       body: JSON.stringify({ ebookItemId: ebookItemId ?? null }),
     }),
   readAlongMap: (itemId: string) => request<SyncMap>(`/api/readalong/${itemId}/map`),
+  /** Chapter names + numbers heard from the narration (Codex); `chapters` is empty until a book has been listened to. */
+  heardChapters: (itemId: string) => request<{ chapters: HeardChapter[] }>(`/api/chapters/${itemId}/heard`),
 
   // The shipped changelog file (served from the SPA's static root, not /api).
   // Raw text — parsed client-side for the Settings About panel.
