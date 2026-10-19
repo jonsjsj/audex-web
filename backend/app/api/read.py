@@ -19,7 +19,8 @@ from app.api.deps import get_current_identity
 from app.core import abs_client, activity
 from app.core.abs_client import AbsError
 from app.core.database import Identity, ReaderBookmark, get_db
-from app.core.epub import EpubError, ParsedEpub, build_manifest, parse_epub
+from app.core.progress_guard import READ_TOLERANCE, moved_elsewhere
+from app.core.epub import EpubError, ParsedEpub, build_manifest, parse_ebook
 
 router = APIRouter(prefix="/api/read", tags=["read"])
 
@@ -50,7 +51,8 @@ async def _get_parsed(conn: AbsConn, identity_id: int, item_id: str, abs_id: str
         if cached is not None:
             return cached
         data = await abs_client.ebook_file(conn.base_url, conn.token, abs_id)
-        parsed = parse_epub(data)  # raises EpubError — let the caller turn that into a 422
+        # Decoding a Kindle book is CPU work (about a second for a long one): off the event loop.
+        parsed = await asyncio.to_thread(parse_ebook, data)  # raises EpubError — let the caller turn that into a 422
         if len(_cache) >= _CACHE_MAX:
             del _cache[next(iter(_cache))]  # dict preserves insertion order — drop the oldest
         _cache[key] = parsed
@@ -165,6 +167,9 @@ async def get_position(
 class SavePositionBody(BaseModel):
     locator: dict
     progress: float  # 0..1 fraction through the whole book, for ebookProgress
+    # The saved fraction this device last knew (loaded, or last saved): if Audiobookshelf holds a different one,
+    # another device has read on since and this older place mustn't replace it (progress_guard.py).
+    knownProgress: float | None = None
 
 
 @router.put("/{item_id}/position")
@@ -174,6 +179,18 @@ async def save_position(
     db: AsyncSession = Depends(get_db),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
+    if body.knownProgress is not None:
+        try:
+            prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
+        except AbsError:
+            prog = None  # can't tell: behave as before rather than lose a position
+        stored = (prog or {}).get("ebookProgress")
+        if isinstance(stored, (int, float)) and moved_elsewhere(body.knownProgress, float(stored), READ_TOLERANCE):
+            await activity.record(
+                identity.id, "audiobookshelf", "Kept your newer reading position", True,
+                f"another device is at {round(float(stored) * 100)}%; this one was at {round(body.progress * 100)}%", dedupe_s=120,
+            )
+            return {"ok": True, "skipped": True, "progress": float(stored)}
     try:
         await abs_client.save_ebook_progress(
             conn.base_url, conn.token, abs_id, ebook_location=json.dumps(body.locator), ebook_progress=body.progress,

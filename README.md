@@ -6,8 +6,8 @@ Audiobookshelf server and (optionally) [Codex](https://github.com/jonsjsj/codex)
 
 Phases 0-3 of the plan are done: sign-in (SSO or Audiobookshelf credentials), the audio
 player (streaming, chapters, speed, sleep timer, resume, OS media controls), the ebook
-reader (an in-house EPUB parser feeding a real @readium/navigator, font size + position
-sync to ABS), and now Codex sync — link your own Codex API key from Settings and audio
+reader (an in-house EPUB parser, with a Kindle AZW3 decoder that turns those books into EPUBs
+in memory, feeding a real @readium/navigator, font size + position sync to ABS), and now Codex sync — link your own Codex API key from Settings and audio
 progress pushes to Codex's webhook in real time, the same call the mobile app makes.
 Read-along lands in the phase after this one.
 

@@ -278,6 +278,20 @@ class ApiError extends Error {
   }
 }
 
+export interface PlaySyncBody {
+  sessionId: string;
+  currentTimeS: number;
+  timeListenedS: number;
+  durationS?: number;
+  knownServerS?: number;
+}
+export interface PlaySyncResult {
+  ok: true;
+  /** Another device had saved a newer place, so this write was not made. */
+  skipped?: boolean;
+  serverTimeS?: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -345,10 +359,15 @@ export const api = {
     request<BookGroup[]>(`/api/library/narrators?libraryId=${encodeURIComponent(libraryId)}`),
 
   play: (itemId: string) => request<PlaySession>(`/api/play/${itemId}`, { method: "POST" }),
-  sync: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>
-    request<{ ok: true }>(`/api/play/${itemId}/sync`, { method: "POST", body: JSON.stringify(body) }),
-  close: (itemId: string, body: { sessionId: string; currentTimeS: number; timeListenedS: number; durationS?: number }) =>
-    request<{ ok: true }>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
+  /** [knownServerS] is the position this device last knew Audiobookshelf held; when another device has saved a
+   *  different one since, nothing is written and the answer says `skipped` with the newer place. */
+  sync: (itemId: string, body: PlaySyncBody) =>
+    request<PlaySyncResult>(`/api/play/${itemId}/sync`, { method: "POST", body: JSON.stringify(body) }),
+  close: (itemId: string, body: PlaySyncBody) =>
+    request<PlaySyncResult>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
+  /** Where Audiobookshelf holds the listening position right now (null when the book was never played). */
+  audioPosition: (itemId: string) =>
+    request<{ currentTimeS: number | null; updatedAt: number | null }>(`/api/play/${itemId}/position`),
   discardAudioProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/play/${itemId}/progress`, { method: "DELETE" }),
   bookmarks: (itemId: string) => request<Bookmark[]>(`/api/play/${itemId}/bookmarks`),
@@ -372,9 +391,17 @@ export const api = {
   readManifest: (itemId: string) => request<ReadiumManifest>(`/api/read/${itemId}/manifest`),
   readPosition: (itemId: string) =>
     request<{ locator: ReadiumLocator | null; progress?: number }>(`/api/read/${itemId}/position`),
-  /** [keepalive] lets the request finish after the page is gone (closing the tab, leaving the reader). */
-  saveReadPosition: (itemId: string, body: { locator: ReadiumLocator; progress: number }, opts?: { keepalive?: boolean }) =>
-    request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "PUT", body: JSON.stringify(body), keepalive: opts?.keepalive }),
+  /** [keepalive] lets the request finish after the page is gone (closing the tab, leaving the reader).
+   *  [knownProgress] is the fraction this device last knew Audiobookshelf held; when another device has read on
+   *  since, nothing is written and the answer says `skipped` with the newer fraction. */
+  saveReadPosition: (
+    itemId: string,
+    body: { locator: ReadiumLocator; progress: number; knownProgress?: number },
+    opts?: { keepalive?: boolean },
+  ) =>
+    request<{ ok: true; skipped?: boolean; progress?: number }>(`/api/read/${itemId}/position`, {
+      method: "PUT", body: JSON.stringify(body), keepalive: opts?.keepalive,
+    }),
   discardReadProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "DELETE" }),
 

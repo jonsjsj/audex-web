@@ -66,6 +66,8 @@ function loadPages(): PageCount {
 }
 
 const SAVE_DEBOUNCE_MS = 2000;
+// How long after following another device's place the reader's own position reports are not saved.
+const FOLLOW_NO_SAVE_MS = 2500;
 
 const FOLLOW_KEY = "audexweb.reader.follow";
 function loadFollow(): boolean {
@@ -338,6 +340,7 @@ export default function Reader() {
         ]);
         if (cancelled) return;
         if (detail) setBookDetail(detail);
+        knownProgressRef.current = positionRes.progress ?? 0; // what Audiobookshelf holds for this book as we open it
 
         weightsRef.current = buildSpineWeights(manifestJson);
         setToc(flattenToc(manifestJson.toc));
@@ -478,7 +481,7 @@ export default function Reader() {
             setChapterTitle(loc.title ?? null);
             const w = weightsRef.current;
             if (w) setCurrentIdx(Math.max(0, w.hrefs.indexOf(loc.href.toString().split("#")[0])));
-            queueSave(itemId!, loc, total);
+            if (Date.now() >= noSaveUntilRef.current) queueSave(itemId!, loc, total);
             // Ask which text begins this page: saved beside the locator so the audio can start at that sentence.
             try {
               awaitingTextRef.current = true;
@@ -586,7 +589,18 @@ export default function Reader() {
     if (!itemId) return;
     const leave = () => flushSave(itemId, true);
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") leave();
+      if (document.visibilityState === "hidden") {
+        leave();
+        return;
+      }
+      // Back in view after a while: has another device read on meanwhile?
+      api
+        .readPosition(itemId)
+        .then((r) => {
+          if (pendingRef.current || r.progress === undefined) return; // a page turn of ours is waiting to be saved
+          if (Math.abs(r.progress - knownProgressRef.current) > 0.01) followOtherDevice(r.progress);
+        })
+        .catch(() => {});
     };
     window.addEventListener("pagehide", leave);
     document.addEventListener("visibilitychange", onVisibility);
@@ -602,6 +616,12 @@ export default function Reader() {
   // fine to drop an intermediate position, never fine to drop the final one
   // (the unmount cleanup above flushes it synchronously on the way out).
   const pendingRef = useRef<{ locator: Locator; total: number; pageStart?: string | null } | null>(null);
+  // The saved fraction this tab last knew Audiobookshelf held (loaded, or last saved). Sent with every save so the
+  // server refuses to replace a place another device has read on to (backend/app/core/progress_guard.py).
+  const knownProgressRef = useRef(0);
+  // Moving to another device's place is not a page turn of ours: the position Readium reports for it is only an
+  // approximation of the fraction asked for, and saving that would shift the other device's saved place.
+  const noSaveUntilRef = useRef(0);
   // The first text on the page being shown, once Readium has said (see positionChanged).
   const pageTextRef = useRef<string | null>(null);
   const awaitingTextRef = useRef(false);
@@ -622,7 +642,25 @@ export default function Reader() {
     // The page's first text, so the audiobook can start at that exact sentence (Audex does the same).
     const pageStart = pending.pageStart ?? pageTextRef.current;
     if (pageStart) locator.pageStart = pageStart.slice(0, 160);
-    api.saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total }, { keepalive: leaving }).catch(() => {});
+    api
+      .saveReadPosition(id, { locator: locator as Record<string, unknown>, progress: pending.total, knownProgress: knownProgressRef.current }, { keepalive: leaving })
+      .then((r) => {
+        if (leaving) return;
+        if (r.skipped && r.progress !== undefined) followOtherDevice(r.progress);
+        else knownProgressRef.current = pending.total;
+      })
+      .catch(() => {});
+  }
+
+  /** Another device has read on since this tab last looked: go to where it got to, and say so. */
+  function followOtherDevice(fraction: number) {
+    knownProgressRef.current = fraction;
+    pendingRef.current = null;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const target = locatorAtTotal(fraction);
+    noSaveUntilRef.current = Date.now() + FOLLOW_NO_SAVE_MS;
+    if (target) navRef.current?.go(target, false, () => {});
+    flash(`Moved to ${Math.round(fraction * 100)}% — where you got to on another device`, 5000);
   }
 
   /** A deliberate move by the reader: don't let following the audio yank the
