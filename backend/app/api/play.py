@@ -16,6 +16,7 @@ from app.api.chapters import synthesized_chapters
 from app.api.connections import list_connections, resolve
 from app.api.deps import get_codex_token, get_current_identity
 from app.core import abs_client, activity, codex_client
+from app.core.progress_guard import AUDIO_TOLERANCE_S, moved_elsewhere
 from app.core.abs_client import AbsError
 from app.core.config import settings
 from app.core.database import Identity, get_db
@@ -67,6 +68,23 @@ class SyncBody(BaseModel):
     currentTimeS: float
     timeListenedS: float
     durationS: float | None = None
+    # The position this device last knew Audiobookshelf held: what it loaded, or what it last saved. If the stored
+    # one is no longer that, another device has saved since and this older one mustn't replace it (progress_guard.py).
+    knownServerS: float | None = None
+
+
+async def _moved_elsewhere(conn, abs_id: str, body: SyncBody) -> float | None:
+    """The newer position another device has saved, or None when this device may write."""
+    if body.knownServerS is None:
+        return None
+    try:
+        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
+    except (AbsError, httpx.HTTPError):
+        return None  # can't tell: behave as before rather than lose a position
+    stored = (prog or {}).get("currentTime")
+    if isinstance(stored, (int, float)) and moved_elsewhere(body.knownServerS, float(stored), AUDIO_TOLERANCE_S):
+        return float(stored)
+    return None
 
 
 def _is_finished(body: SyncBody) -> bool:
@@ -84,6 +102,13 @@ async def sync(
     codex_token: str | None = Depends(get_codex_token),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
+    newer = await _moved_elsewhere(conn, abs_id, body)
+    if newer is not None:
+        await activity.record(
+            identity.id, "audiobookshelf", "Kept your newer position", True,
+            f"another device saved {int(newer // 60)} min in; this one was at {int(body.currentTimeS // 60)} min", dedupe_s=120,
+        )
+        return {"ok": True, "skipped": True, "serverTimeS": newer}
     try:
         await abs_client.sync_session(
             conn.base_url, conn.token, body.sessionId,
@@ -102,7 +127,7 @@ async def sync(
         )
         if not ok:
             await activity.record(identity.id, "codex", "Send listening position", False, why, dedupe_s=600)
-    return {"ok": True}
+    return {"ok": True, "serverTimeS": body.currentTimeS}
 
 
 @router.post("/{item_id}/close")
@@ -113,6 +138,21 @@ async def close(
     codex_token: str | None = Depends(get_codex_token),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
+    newer = await _moved_elsewhere(conn, abs_id, body)
+    if newer is not None:
+        # Close the session, but at the position another device saved — this older one doesn't replace it.
+        try:
+            await abs_client.close_session(
+                conn.base_url, conn.token, body.sessionId,
+                current_time=newer, time_listened=body.timeListenedS, duration=body.durationS,
+            )
+        except (AbsError, httpx.HTTPError):
+            pass
+        await activity.record(
+            identity.id, "audiobookshelf", "Kept your newer position", True,
+            f"another device saved {int(newer // 60)} min in; this one closed at {int(body.currentTimeS // 60)} min", dedupe_s=120,
+        )
+        return {"ok": True, "skipped": True, "serverTimeS": newer}
     try:
         await abs_client.close_session(
             conn.base_url, conn.token, body.sessionId,
@@ -131,6 +171,26 @@ async def close(
         )
         await activity.record(identity.id, "codex", "Send listening position", ok, "Codex has your position" if ok else why)
     return {"ok": True}
+
+
+@router.get("/{item_id}/position")
+async def audio_position(
+    item_id: str,
+    identity: Identity = Depends(get_current_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    """Where Audiobookshelf holds this book's listening position right now — what a tab that has been open a while
+    asks before playing, to pick up wherever another device has got to."""
+    conn, abs_id = await resolve(identity, db, item_id)
+    try:
+        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
+    except AbsError as e:
+        raise HTTPException(502, str(e))
+    cur = (prog or {}).get("currentTime")
+    return {
+        "currentTimeS": float(cur) if isinstance(cur, (int, float)) else None,
+        "updatedAt": (prog or {}).get("lastUpdate"),
+    }
 
 
 @router.delete("/{item_id}/progress")

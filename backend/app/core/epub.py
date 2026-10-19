@@ -14,6 +14,9 @@ consumes directly.
 Deliberately does NOT implement EPUB2 guide, page-list, or encryption (Adobe DRM etc.) —
 out of scope for a personal ABS library. NCX (EPUB2) and nav.xhtml (EPUB3) TOC are both
 handled since ABS libraries commonly mix both formats' books.
+
+Kindle books (AZW3 / KF8) are recognised by their "BOOKMOBI" mark and converted to an EPUB in
+memory first (kindle.py), so everything below treats them like any other EPUB; see parse_ebook().
 """
 from __future__ import annotations
 
@@ -23,6 +26,8 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
+
+from app.core import kindle
 
 OPF_NS = "http://www.idpf.org/2007/opf"
 DC_NS = "http://purl.org/dc/elements/1.1/"
@@ -87,6 +92,18 @@ def _resolve(base_dir: str, href: str) -> str:
     references it, and may contain '../'. normpath collapses that; POSIX
     join because zip entries always use '/' regardless of host OS."""
     return posixpath.normpath(posixpath.join(base_dir, href)) if base_dir else posixpath.normpath(href)
+
+
+def parse_ebook(data: bytes) -> ParsedEpub:
+    """Parses a book file of any format Webdex can read: an EPUB, or a Kindle book
+    (AZW3 / KF8, also under the old .azw / .mobi / .prc names) which is converted to an
+    EPUB in memory first. Raises EpubError with a message fit to show the reader."""
+    if kindle.is_kindle(data[:68]):
+        try:
+            data = kindle.to_epub_bytes(data)
+        except kindle.KindleError as e:
+            raise EpubError(str(e)) from e
+    return parse_epub(data)
 
 
 def parse_epub(data: bytes) -> ParsedEpub:

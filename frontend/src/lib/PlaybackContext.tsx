@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Bookmark, BookDetail, Chapter, PlaySession } from "../api/client";
+import { api, Bookmark, BookDetail, Chapter, PlaySession, PlaySyncBody } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
 import { progressionAt } from "./syncMap";
 import { audioTimeOfSavedReading } from "./readingSpot";
@@ -10,6 +10,15 @@ import { useBookChapters } from "./useBookChapters";
 import { useHeardChapters } from "./useHeardChapters";
 
 const SYNC_INTERVAL_MS = 15_000;
+// Audiobookshelf holds a position this far from the one this tab last knew → another device saved since. Matches
+// the server's own check (backend/app/core/progress_guard.py), which is what actually refuses the older write.
+const MOVED_ELSEWHERE_S = 30;
+// While paused and in view, look for another device's progress every Nth sync tick (N × 15 s = a minute).
+const PAUSED_CHECK_EVERY_TICKS = 4;
+// Pressing play checks first only when the last look is older than this, so play stays instant in the usual case.
+const PLAY_CHECK_AFTER_MS = 20_000;
+// A seek is saved this long after the last one, without waiting for the next sync tick.
+const SEEK_SAVE_DELAY_MS = 2_000;
 export const SLEEP_OPTIONS = [0, 15, 30, 45, 60]; // minutes, 0 = off
 // Mirrors the mobile app's own PlaybackControllerImpl: a jump of at least
 // this many seconds — a chapter tap, a scrubber drag, several skips in a
@@ -37,11 +46,26 @@ function locate(tracks: PlaySession["tracks"], posS: number): { index: number; w
   return { index: idx, withinS: Math.max(0, posS - tracks[idx].startOffsetS) };
 }
 
-/** POST close with sendBeacon so it actually fires on tab-close —
+/** POST with sendBeacon so it actually fires on tab-close or when the tab is hidden —
  *  a plain fetch() gets cancelled the instant the page unloads. */
-function closeBeacon(itemId: string, body: object) {
+function beacon(path: string, body: object) {
   const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
-  navigator.sendBeacon(`/api/play/${itemId}/close`, blob);
+  navigator.sendBeacon(path, blob);
+}
+function closeBeacon(itemId: string, body: PlaySyncBody) {
+  beacon(`/api/play/${itemId}/close`, body);
+}
+function syncBeacon(itemId: string, body: PlaySyncBody) {
+  beacon(`/api/play/${itemId}/sync`, body);
+}
+
+/** Whether this tab's last attempts to save the position reached Audiobookshelf — shown in the player so a
+ *  silent failure can't go on for hours. */
+export interface SyncStatus {
+  /** When the position was last saved (ms), or null if not yet this session. */
+  savedAt: number | null;
+  /** The last attempt failed and is being retried. */
+  failing: boolean;
 }
 
 interface PlaybackState {
@@ -57,6 +81,7 @@ interface PlaybackState {
   sleepRemainingS: number | null;
   bookmarks: Bookmark[];
   resumeNotice: string | null;
+  syncStatus: SyncStatus;
   readAlong: ReturnType<typeof useReadAlong>;
   audioRef: React.RefObject<HTMLAudioElement>;
   // Not React.RefObject<number> — that type allows `current: null`, which
@@ -120,6 +145,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [sleepRemainingS, setSleepRemainingS] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ savedAt: null, failing: false });
 
   // Enabled when this item has its own ebook, OR a DIFFERENT item is the
   // same work's ebook edition (pairedItemId — see catalog_match.py). The
@@ -135,7 +161,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const loadTokenRef = useRef(0);
 
   // Mutable session bookkeeping that effects need without re-subscribing.
-  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0 });
+  // `knownServerS` is the position Audiobookshelf held when we last looked or wrote — sent with every save so the
+  // server can refuse to replace a newer place another device has saved (progress_guard.py). `dirty` is "played or
+  // moved since the last confirmed save".
+  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false });
+  // The latest of everything an event listener or timer (registered once) needs, so none runs on a stale render.
+  const itemIdRef = useRef<string | null>(null);
+  const isPlayingRef = useRef(false);
+  const seekSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCheckRef = useRef(0);
+  const pickingUpRef = useRef(false);
+  const latestRef = useRef<{ syncNow: (o?: { beacon?: boolean }) => Promise<void>; pickUp: () => Promise<boolean> } | null>(null);
   // A seek requested before the browser has metadata for the (possibly just
   // swapped) track is silently dropped if applied synchronously — browsers
   // don't know the seekable range yet. Stash it here and apply it from
@@ -163,13 +199,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     positionRef.current = positionS;
   }, [positionS]);
+  itemIdRef.current = itemId;
+  isPlayingRef.current = isPlaying;
+  const trackIndexRef = useRef(0);
+  trackIndexRef.current = trackIndex;
 
   /** Starts (or switches to) a book. Closes whatever session was already
    *  open first — this is the ONLY place a session gets closed short of an
    *  explicit discard or the tab actually closing, since playback is now
    *  meant to survive ordinary in-app navigation. */
   function play(newItemId: string) {
-    if (newItemId === itemId && (session || error)) return; // already loaded/loading this book
+    if (newItemId === itemId && (session || error)) {
+      // Already loaded — but this tab may have sat for hours while another device moved on: look before resuming.
+      if (!isPlayingRef.current) void latestRef.current?.pickUp();
+      return;
+    }
     const prev = stateRef.current;
     if (prev.sessionId && itemId) {
       closeBeacon(itemId, {
@@ -177,8 +221,10 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         currentTimeS: positionRef.current,
         timeListenedS: prev.timeListenedS,
         durationS: prev.durationS,
+        knownServerS: prev.knownServerS,
       });
     }
+    if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
     setItemId(newItemId);
     setBook(null);
     setSession(null);
@@ -186,7 +232,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setResumeNotice(null);
     explicitJumpRef.current = false;
     autoResumedRef.current = false;
-    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0 };
+    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false };
+    setSyncStatus({ savedAt: null, failing: false });
+    lastCheckRef.current = Date.now();
 
     const token = ++loadTokenRef.current;
     Promise.all([
@@ -207,6 +255,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         setTrackIndex(index);
         setPositionS(s.currentTimeS);
         stateRef.current.lastSyncPos = s.currentTimeS;
+        stateRef.current.knownServerS = s.currentTimeS;
         pendingSeekRef.current = { withinS, thenPlay: false };
       })
       .catch((e) => {
@@ -231,34 +280,126 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   }, [session]);
 
   // Close the session when the tab actually closes — registered once, not
-  // per-book, since this context itself never unmounts.
+  // per-book, since this context itself never unmounts. The server refuses to let this replace a newer place
+  // another device saved (knownServerS), so a tab left open for hours can't undo the phone's progress on the way out.
   useEffect(() => {
     const onUnload = () => {
       const st = stateRef.current;
-      if (!st.sessionId || !itemId) return;
-      closeBeacon(itemId, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS });
+      const id = itemIdRef.current;
+      if (!st.sessionId || !id) return;
+      closeBeacon(id, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS, knownServerS: st.knownServerS });
     };
     window.addEventListener("pagehide", onUnload);
     return () => window.removeEventListener("pagehide", onUnload);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId]);
+  }, []);
 
-  // ── Periodic position sync while playing ─────────────────────────────────
+  /** Saves the position now. The server answers `skipped` when another device has saved a newer one since this tab
+   *  last looked; this tab then moves there instead (adoptServerPosition). A failure is kept and retried. */
+  async function syncNow(opts: { beacon?: boolean } = {}) {
+    const id = itemIdRef.current;
+    const st = stateRef.current;
+    if (!id || !st.sessionId) return;
+    const pos = positionRef.current;
+    const listened = Math.max(0, pos - st.lastSyncPos);
+    const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS };
+    const prevLast = st.lastSyncPos;
+    st.timeListenedS += listened;
+    st.lastSyncPos = pos;
+    if (opts.beacon) {
+      // The tab is being hidden: nothing can read the answer, but the server applies the same check.
+      syncBeacon(id, body);
+      st.knownServerS = pos;
+      st.dirty = false;
+      return;
+    }
+    try {
+      const r = await api.sync(id, body);
+      if (itemIdRef.current !== id || stateRef.current !== st) return; // switched book meanwhile
+      if (r.skipped && r.serverTimeS !== undefined) {
+        audioRef.current?.pause();
+        adoptServerPosition(r.serverTimeS, "Your place moved on another device, so this one stopped and followed");
+        return;
+      }
+      st.knownServerS = pos;
+      if (positionRef.current === pos) st.dirty = false;
+      setSyncStatus({ savedAt: Date.now(), failing: false });
+    } catch {
+      // Not saved: take the listening time back and try again on the next tick.
+      st.lastSyncPos = prevLast;
+      st.timeListenedS -= listened;
+      st.dirty = true;
+      setSyncStatus((cur) => ({ ...cur, failing: true }));
+    }
+  }
+
+  /** Moves this tab to the position another device saved, with a note saying so (and where this one was). */
+  function adoptServerPosition(serverS: number, lead: string) {
+    const st = stateRef.current;
+    const from = positionRef.current;
+    st.knownServerS = serverS;
+    seekTo(serverS, { fromServer: true });
+    setResumeNotice(`${lead} — ${formatTime(serverS)} (this one was at ${formatTime(from)})`);
+  }
+
+  /** Asks Audiobookshelf where the book is now; when another device has moved it, this tab follows. Resolves true
+   *  when it moved. Never runs while audio is playing here (the server's check covers that case). */
+  async function pickUp(): Promise<boolean> {
+    const id = itemIdRef.current;
+    const st = stateRef.current;
+    if (!id || !st.sessionId || pickingUpRef.current) return false;
+    pickingUpRef.current = true;
+    lastCheckRef.current = Date.now();
+    try {
+      const p = await api.audioPosition(id);
+      if (itemIdRef.current !== id || stateRef.current !== st || p.currentTimeS === null) return false;
+      if (Math.abs(p.currentTimeS - st.knownServerS) <= MOVED_ELSEWHERE_S) return false;
+      adoptServerPosition(p.currentTimeS, "Continued from your other device");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      pickingUpRef.current = false;
+    }
+  }
+  latestRef.current = { syncNow, pickUp };
+
+  // ── Saving the position ──────────────────────────────────────────────────
+  // Every 15 s while playing — and, if a save failed or a seek is still unsaved, while paused too; when paused and
+  // in view it instead looks (about once a minute) for progress another device has made.
+  const tickRef = useRef(0);
   useEffect(() => {
-    if (!isPlaying || !itemId) return;
+    if (!itemId) return;
     const handle = setInterval(() => {
       const st = stateRef.current;
       if (!st.sessionId) return;
-      const pos = positionRef.current;
-      const listened = Math.max(0, pos - st.lastSyncPos);
-      st.timeListenedS += listened;
-      st.lastSyncPos = pos;
-      api
-        .sync(itemId, { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS })
-        .catch(() => {});
+      tickRef.current++;
+      if (isPlayingRef.current || st.dirty) void latestRef.current?.syncNow();
+      else if (document.visibilityState === "visible" && tickRef.current % PAUSED_CHECK_EVERY_TICKS === 0) void latestRef.current?.pickUp();
     }, SYNC_INTERVAL_MS);
     return () => clearInterval(handle);
-  }, [isPlaying, itemId]);
+  }, [itemId]);
+
+  // Leaving the tab saves at once (a hidden tab may be frozen or discarded); coming back looks for the other
+  // device's progress; the network returning retries a failed save.
+  useEffect(() => {
+    const onVisibility = () => {
+      const st = stateRef.current;
+      if (document.visibilityState === "hidden") {
+        if (st.sessionId && (isPlayingRef.current || st.dirty)) void latestRef.current?.syncNow({ beacon: true });
+      } else if (!isPlayingRef.current) {
+        void latestRef.current?.pickUp();
+      }
+    };
+    const onOnline = () => {
+      if (stateRef.current.dirty) void latestRef.current?.syncNow();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+    };
+  }, []);
 
   // ── Sleep timer ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -333,14 +474,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readAlong.map, book, session, readingSpot]);
 
-  function seekTo(targetS: number) {
+  /** [fromServer]: the move is following another device's saved position, so it isn't a "jump" worth a "Left off"
+   *  bookmark and there is nothing of ours to save. */
+  function seekTo(targetS: number, opts: { fromServer?: boolean } = {}) {
     if (!session) return;
     const clamped = Math.max(0, Math.min(session.durationS, targetS));
     const { index, withinS } = locate(session.tracks, clamped);
     const audio = audioRef.current;
     if (!audio) return;
-    maybeAutoBookmark(positionRef.current, clamped);
-    if (index !== trackIndex) {
+    if (!opts.fromServer) maybeAutoBookmark(positionRef.current, clamped);
+    if (index !== trackIndexRef.current) {
       const wasPlaying = !audio.paused;
       pendingSeekRef.current = { withinS, thenPlay: wasPlaying };
       audio.src = session.tracks[index].streamUrl;
@@ -350,7 +493,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       audio.currentTime = withinS;
     }
     setPositionS(clamped);
+    positionRef.current = clamped;
     stateRef.current.lastSyncPos = clamped;
+    if (!opts.fromServer) {
+      // Save a move soon after it's made, not on the next tick — a phone picked up a moment later finds it.
+      stateRef.current.dirty = true;
+      if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
+      seekSaveTimerRef.current = setTimeout(() => void latestRef.current?.syncNow(), SEEK_SAVE_DELAY_MS);
+    }
   }
 
   function skip(deltaS: number) {
@@ -366,8 +516,19 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   function togglePlayPause() {
     const audio = audioRef.current;
     if (!audio) return;
-    if (audio.paused) audio.play().catch(() => setError("Playback failed — try again."));
-    else audio.pause();
+    if (!audio.paused) {
+      audio.pause();
+      return;
+    }
+    const start = () => audio.play().catch(() => setError("Playback failed — try again."));
+    // A tab that has been open a while may be behind another device: look first (at most ~1 s), then play from
+    // wherever the book really is — never start from a stale place and save it over the newer one.
+    if (Date.now() - lastCheckRef.current > PLAY_CHECK_AFTER_MS && stateRef.current.sessionId) {
+      const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200));
+      void Promise.race([pickUp(), timeout]).then(start, start);
+    } else {
+      start();
+    }
   }
 
   function onTrackEnded() {
@@ -462,6 +623,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // straight back on the next sync tick, resurrecting what was just wiped.
     audioRef.current?.pause();
     stateRef.current.sessionId = ""; // suppresses the periodic sync + pagehide close
+    if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
     await api.discardAudioProgress(itemId);
     stop();
     navigate("/");
@@ -494,6 +656,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     sleepRemainingS,
     bookmarks,
     resumeNotice,
+    syncStatus,
     readAlong,
     audioRef,
     positionRef,
@@ -524,8 +687,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
           playback survive navigating around the app. */}
       <audio
         ref={audioRef}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPlay={() => {
+          stateRef.current.dirty = true; // playing moves the place: it must reach the server even if paused again
+          setIsPlaying(true);
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          void syncNow(); // the place you stopped at, now — not up to 15 s later (or never, on a closed tab)
+        }}
         onEnded={onTrackEnded}
         onTimeUpdate={(e) => {
           if (!session) return;

@@ -38,6 +38,24 @@ Audio position goes through ABS's session API, never `PATCH /api/me/progress`:
    playing: `{currentTime, timeListened, duration}`.
 3. `POST /api/session/{sessionId}/close` → same body, on pause/stop/unload.
 
+### Not overwriting a newer position (Webdex's stale-write guard)
+
+ABS stores whatever it is last told; it never asks whether the writer has seen the latest. A device that has been
+asleep (a browser tab open overnight, a phone whose app was frozen) therefore replaces a newer position with an old one
+the moment it syncs or closes its session. Webdex prevents this itself, and a client of ABS can do the same:
+
+1. Remember the position ABS held when you loaded it, and after each successful save, the one you sent (`known`).
+2. Before writing, read `GET /api/me/progress/{id}` and compare `currentTime` (audio) or `ebookProgress` (ebook) with
+   `known`. Nothing but another device changes it in between, so a difference — more than ~30 s of audio, or 1 % of a
+   book, to allow for rounding — means a newer place exists. **Don't write; adopt that place** (and say so).
+3. Do the same check before starting to play after the app has been idle, when the app comes to the foreground, and
+   every minute or so while paused. When closing a session on the way out, close it *at the newer position*.
+
+Webdex sends `knownServerS` / `knownProgress` with its saves and the server does the comparison
+(`backend/app/core/progress_guard.py`); the answer is `{"ok": true, "skipped": true, "serverTimeS" | "progress": …}`.
+Also save on pause, shortly after a seek, and when going to the background — not only on a 15 s tick — and keep a
+failed save to retry; a swallowed failure is how a position ends up hours behind without anyone noticing.
+
 ### Ebook file / any file
 
 There's no dedicated "download ebook" endpoint — audio tracks and ebook files

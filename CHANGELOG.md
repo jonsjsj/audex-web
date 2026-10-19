@@ -7,6 +7,29 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.0] - 2026-10-19
+
+### Added
+- **Kindle books open in the reader.** Books Audiobookshelf holds as AZW3 (also `.azw`, `.mobi` and `.prc` files that
+  carry the newer KF8 format) are decoded in Audex Web itself, the way the Audex app has done since 0.4.61.0, so the
+  Read button, bookmarks, chapter names and reading progress work for them like for any EPUB. Nothing is converted on
+  disk and ABS's file is left alone. Checked page-for-page against an independent converter (KindleUnpack) on real
+  books. Books it can't open say why instead of showing a blank page: protected by DRM, a fixed-layout (comic or
+  print-replica) book, an old MOBI 6 file with no newer half, or a download that was cut short.
+
+### Fixed
+- **A tab left open no longer undoes your progress from the phone.** Every save of your place now says which place this
+  tab last knew Audiobookshelf held. If another device has saved a different one since (you listened or read on the
+  phone), the older tab is refused instead of replacing it, and follows the phone: when you come back to the tab, when
+  you press Play after a while, and about once a minute while it sits paused. It says so ("Continued from your other
+  device — 3:12:40 (this one was at 1:05:00)") and never writes the old place back, whether by playing, turning a
+  page, or closing the tab. The same goes for reading.
+- **The place is saved the moment you pause or jump**, not up to 15 seconds later: on pause, 2 seconds after a seek,
+  and the instant the tab is hidden. Before, closing the laptop lid right after pausing could lose it.
+- **A save that fails is no longer silent.** The player shows "Place saved 14:32", turning red with "Your place isn't
+  reaching the server — retrying" when it can't reach Audiobookshelf, and keeps retrying (also when you pause, and as
+  soon as the network is back) instead of waiting for the next listening tick.
+
 ## [0.8.0] - 2026-10-11
 
 ### Added

@@ -166,7 +166,7 @@ export default function Player() {
   }
   if (!loaded) return <p className="sub" style={{ padding: "2rem" }}>Loading…</p>;
 
-  const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, readAlong, chapterLabels, chapters, readingAheadS } = playback;
+  const { book, session, positionS, isPlaying, speed, sleepRemainingS, bookmarks, resumeNotice, syncStatus, readAlong, chapterLabels, chapters, readingAheadS } = playback;
   const shown = scrubbing ?? positionS;
   const currentChapter = chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
@@ -216,6 +216,15 @@ export default function Player() {
       </div>
 
       {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
+      {syncStatus.failing ? (
+        <p className="player-sync-status is-failing" role="status">
+          Your place isn't reaching the server — retrying{syncStatus.savedAt ? ` (last saved ${new Date(syncStatus.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})` : ""}
+        </p>
+      ) : syncStatus.savedAt ? (
+        <p className="player-sync-status">
+          Place saved {new Date(syncStatus.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </p>
+      ) : null}
 
       <div className="player-progress-section">
         <p className="player-current-chapter">{playback.chapterLabel ?? ""}</p>
