@@ -6,6 +6,9 @@ COPY frontend/package.json ./
 RUN npm install
 
 COPY frontend/ .
+# The app serves its own changelog (Settings → About: "what's new", "last updated"). Always take the repo's real
+# CHANGELOG.md here, so that file can never lag a release behind the copy kept in frontend/public/.
+COPY CHANGELOG.md ./public/CHANGELOG.md
 RUN npm run build
 
 # ── Stage 2: Python backend, serving the built SPA directly ──────────────────

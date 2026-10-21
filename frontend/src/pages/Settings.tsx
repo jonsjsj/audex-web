@@ -156,53 +156,65 @@ export default function Settings() {
     setUpdating(true);
     setUpdateError(null);
     setUpdateMessage(null);
-    let res: { message: string };
     try {
-      res = await api.triggerUpdate();
+      const res = await api.triggerUpdate();
+      setUpdateMessage(res.message);
     } catch (e) {
       setUpdateError(e instanceof Error ? e.message : "Couldn't start the update.");
       setUpdating(false);
       return;
     }
-    setUpdateMessage(`${res.message} Watching for it to come back…`);
 
+    // The server downloads the image in the background and records where it is; watch that, and the version coming
+    // back. A big image can take minutes, and the container is briefly offline while it is swapped, so reads fail for
+    // a while — that is expected, not a failure.
     const target = updateCheck?.latestVersion ?? null;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    for (let i = 0; i < 40; i++) {
+    const STEPS: Record<string, string> = {
+      pulling: "Downloading the new version…",
+      queued: "Swapping the container…",
+      stop: "Swapping the container (stopping the old one)…",
+      remove: "Swapping the container (removing the old one)…",
+      create: "Swapping the container (creating the new one)…",
+      start: "Swapping the container (starting the new one)…",
+    };
+    for (let i = 0; i < 200; i++) {
       await sleep(3000);
-      // Did the new version come up? (Fetches throw while it's mid-restart —
-      // that's expected, keep waiting.)
       try {
         const h = await api.health();
         if (target && h.version === target) {
-          setUpdateMessage(`Updated to v${target} ✓ — reload the page to use it.`);
-          setUpdating(false);
+          setUpdateMessage(`Updated to v${target} ✓ — reloading…`);
+          await sleep(1200);
+          window.location.reload();
           return;
         }
       } catch {
         /* server restarting — ignore and keep polling */
       }
-      // Did the updater record a failed swap step?
       try {
         const s = await api.updateStatus();
         if (s.state === "failed") {
           setUpdateError(
-            `Update failed while trying to ${s.step ?? "swap the container"}. ` +
-              `The app is on the old version (or your server needs a look).`,
+            s.error
+              ? `The update failed: ${s.error}`
+              : `The update failed while trying to ${s.step ?? "swap the container"}. The app is on the old version (or your server needs a look).`,
           );
+          setUpdateMessage(null);
           setUpdating(false);
           return;
         }
         if (s.state === "success" && !target) {
-          setUpdateMessage("Update finished ✓ — reload the page.");
-          setUpdating(false);
+          setUpdateMessage("Update finished ✓ — reloading…");
+          await sleep(1200);
+          window.location.reload();
           return;
         }
+        if (s.state === "in_progress") setUpdateMessage(STEPS[s.step ?? ""] ?? "Updating…");
       } catch {
-        /* status not readable (server down mid-swap) — ignore */
+        setUpdateMessage("Swapping the container — the page is briefly offline…");
       }
     }
-    setUpdateMessage("Couldn't confirm the update automatically — reload the page to check the version.");
+    setUpdateMessage("Still not back after 10 minutes — check the container in Portainer, then reload this page.");
     setUpdating(false);
   }
 
@@ -497,6 +509,10 @@ export default function Settings() {
           </p>
         )}
 
+        {/* Where the update is, right under the button — not below the changelog, where it went unseen. */}
+        {updateMessage && <p className="settings-help" role="status">{updateMessage}</p>}
+        {updateError && <div className="error" role="alert" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
+
         {/* This build's own notes. */}
         {currentEntry?.body && (
           <div className="settings-changelog-block">
@@ -534,8 +550,6 @@ export default function Settings() {
           </>
         )}
 
-        {updateMessage && <p className="settings-help">{updateMessage}</p>}
-        {updateError && <div className="error" style={{ marginTop: "0.6rem" }}>{updateError}</div>}
       </section>
 
       <section className="settings-section">

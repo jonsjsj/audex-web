@@ -12,6 +12,7 @@ docker-compose.yml's `docker_sock` bind) — a clean 400 when it isn't, not a
 crash. Homelab-scale trust model: this app has no separate admin role, so
 any signed-in person can trigger it, same as every other write endpoint here.
 """
+import asyncio
 import json
 import os
 import re
@@ -33,6 +34,14 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # space-separated text ("<state> <step> <target> <epoch>") so the helper, a
 # minimal curl-image shell with no jq, can write it without JSON escaping.
 _STATUS_FILE = "update_status.txt"
+# Why the last attempt failed, in words (one line) — read back by the status endpoint so the Settings page can say
+# WHAT went wrong instead of a step name.
+_ERROR_FILE = "update_error.txt"
+# An attempt that has been "in progress" this long is treated as dead (the container was replaced, or it crashed),
+# so it never blocks the next try.
+_STALE_AFTER_S = 15 * 60
+# The running background update, held so it isn't garbage-collected mid-flight.
+_running: set[asyncio.Task] = set()
 
 
 def _client() -> httpx.AsyncClient:
@@ -54,6 +63,26 @@ def _write_status(state: str, step: str, target: str) -> None:
             f.write(f"{state} {step} {target} {int(time.time())}")
     except OSError:
         pass  # best-effort; a missing status file just reads back as "idle"
+
+
+def _error_path() -> str:
+    return os.path.join(settings.DATA_DIR, _ERROR_FILE)
+
+
+def _write_error(message: str) -> None:
+    try:
+        with open(_error_path(), "w") as f:
+            f.write(" ".join(message.split())[:500])
+    except OSError:
+        pass
+
+
+def _read_error() -> str | None:
+    try:
+        with open(_error_path()) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def user_env(container_env: list[str], image_env: set[str]) -> list[str]:
@@ -121,7 +150,7 @@ async def _update_status_raw():
     step = parts[1] if len(parts) > 1 else None
     target = parts[2] if len(parts) > 2 else None
     at = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
-    return {"state": state, "step": step, "target": target, "at": at}
+    return {"state": state, "step": step, "target": target, "at": at, "error": _read_error() if state == "failed" else None}
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
@@ -188,16 +217,40 @@ async def update_check(identity=Depends(get_current_identity)):
 
 @router.post("/update")
 async def trigger_update(identity=Depends(get_current_identity)):
+    """Starts the update and returns AT ONCE. Downloading a new image takes a minute or more — far longer than a
+    reverse proxy will hold a request open, and the page used to sit on "Updating…" with nothing to show for it
+    (and give up waiting before a slow pull finished). The work runs in the background and records where it is
+    (`pulling`, then the swap steps) for GET /update/status, which the Settings page watches."""
+    if not os.path.exists(settings.DOCKER_SOCK):
+        raise HTTPException(400, "No Docker socket mounted — can't self-update from inside the container.")
+    current = await _update_status_raw()
+    if current["state"] == "in_progress" and current["at"] and time.time() - current["at"] < _STALE_AFTER_S:
+        return {"ok": True, "message": "An update is already running — watching it."}
+    tag = settings.UPDATE_IMAGE.rpartition(":")[2] if ":" in settings.UPDATE_IMAGE else "latest"
+    _write_status("in_progress", "pulling", tag)
+    _write_error("")
+    task = asyncio.create_task(_update_in_background(identity.id, tag))
+    _running.add(task)
+    task.add_done_callback(_running.discard)
+    return {"ok": True, "message": "Downloading the new version…"}
+
+
+async def _update_in_background(identity_id: int, tag: str) -> None:
     try:
-        res = await _do_update()
+        await _do_update()
     except HTTPException as e:
-        await activity.record(identity.id, "update", "Update", False, str(e.detail))
-        raise
+        reason = str(e.detail)
     except httpx.HTTPError as e:
-        await activity.record(identity.id, "update", "Update", False, activity.describe_error(e))
-        raise HTTPException(502, f"Update failed: {activity.describe_error(e)}")
-    await activity.record(identity.id, "update", "Update", True, "New image pulled; swapping the container now.")
-    return res
+        reason = activity.describe_error(e)
+    except Exception as e:  # never leave the page waiting on a task that died quietly
+        reason = f"{e.__class__.__name__}: {e}"
+    else:
+        await activity.record(identity_id, "update", "Update", True, "New image pulled; swapping the container now.")
+        return
+    _write_error(reason)
+    if (await _update_status_raw())["state"] != "failed":  # the helper steps record their own, more exact step
+        _write_status("failed", "download" if "pull" in reason.lower() else "prepare", tag)
+    await activity.record(identity_id, "update", "Update", False, reason)
 
 
 async def _do_update():

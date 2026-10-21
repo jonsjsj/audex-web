@@ -7,6 +7,20 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.1] - 2026-10-19
+
+### Fixed
+- **"Update to vX" no longer looks dead.** The button used to hold the whole image download inside one request, so the
+  page sat on "Updating…" with nothing to show, and a reverse proxy could cut the request off before a slow download
+  finished. The update now starts at once and the page shows each step right under the button — "Downloading the new
+  version…", "Swapping the container…" — waits up to 10 minutes for the new version to come back, and reloads itself
+  when it has. If it fails, the real reason is shown ("Pull of … failed: unauthorized", "Couldn't start the updater: …")
+  instead of a step name, and the Activity log records it too. Pressing it twice doesn't start two updates.
+- **"What's new" now matches the version you are running.** The changelog the page shows was a separate copy that had
+  to be remembered at every release and had fallen a release behind (it lacked 0.8.0 entirely), so after updating the
+  notes still described the old version. The image build now takes the real `CHANGELOG.md`, the browser no longer keeps
+  an old copy, and a test fails if `VERSION` and the newest changelog entry disagree.
+
 ## [0.9.0] - 2026-10-19
 
 ### Added
