@@ -447,7 +447,8 @@ export const api = {
   // The shipped changelog file (served from the SPA's static root, not /api).
   // Raw text — parsed client-side for the Settings About panel.
   changelog: async (): Promise<string> => {
-    const res = await fetch("/CHANGELOG.md", { credentials: "include" });
+    // no-cache: a browser (or proxy) holding an older copy made "what's new" lag a release behind after an update.
+    const res = await fetch("/CHANGELOG.md", { credentials: "include", cache: "no-cache" });
     if (!res.ok) throw new ApiError(res.status, `Couldn't load the changelog (${res.status})`);
     return res.text();
   },
@@ -459,7 +460,7 @@ export const api = {
   diagnostics: () => request<{ checkedAt: number; checks: DiagnosticCheck[] }>("/api/diagnostics"),
   triggerUpdate: () => request<{ ok: true; message: string }>("/api/admin/update", { method: "POST" }),
   updateStatus: () =>
-    request<{ state: string; step: string | null; target: string | null; at: number | null }>(
+    request<{ state: string; step: string | null; target: string | null; at: number | null; error?: string | null }>(
       "/api/admin/update/status",
     ),
 
