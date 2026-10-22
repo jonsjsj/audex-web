@@ -5,6 +5,7 @@ import { useReadAlong } from "./useReadAlong";
 import { progressionAt } from "./syncMap";
 import { audioTimeOfSavedReading } from "./readingSpot";
 import { tagTitle } from "./bookmarkTitle";
+import { onLocalPosFromOtherTab, readLocalPos, shouldAdoptForAudio, writeLocalPos } from "./localSync";
 import { chapterIndexAt, LabeledChapter, nextChapterStart, previousChapterStart } from "./chapters";
 import { useBookChapters } from "./useBookChapters";
 import { useHeardChapters } from "./useHeardChapters";
@@ -109,6 +110,9 @@ interface PlaybackState {
   discardProgress: () => Promise<void>;
   jumpToText: () => void;
   jumpToReadingPosition: () => void;
+  /** The reader turned a page: move the audio to the first words on it (no "Left off" bookmark, no local write that would
+   *  claim the player moved it). Keeps playing if it was playing. Only meaningful for the book loaded here. */
+  seekFromReader: (targetS: number) => void;
   stop: () => void;
   /** Player.tsx calls this when it applies a ?atTime= override (from
    *  Reader's "Jump to audio" link) so the auto-resume-from-reading effect
@@ -155,6 +159,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const readAlong = useReadAlong(itemId ?? undefined, !!(book?.hasEbook || book?.pairedItemId));
   const explicitJumpRef = useRef(false);
   const autoResumedRef = useRef(false);
+  // On-device hand-over between reading and listening (localSync.ts): when the player last wrote it, and whether this book
+  // has been played yet (a paused, untouched player must not claim the place the reader is at).
+  const lastLocalWriteRef = useRef(0);
+  const playedRef = useRef(false);
+  const readAlongMapRef = useRef<typeof readAlong.map>(null);
+  readAlongMapRef.current = readAlong.map;
   // Guards against a stale response landing after a second play() call (e.g.
   // rapidly clicking between two different books' pages before the first
   // one's fetch even resolves) — only the MOST RECENT call's result applies.
@@ -232,6 +242,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setResumeNotice(null);
     explicitJumpRef.current = false;
     autoResumedRef.current = false;
+    playedRef.current = false;
     stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false };
     setSyncStatus({ savedAt: null, failing: false });
     lastCheckRef.current = Date.now();
@@ -251,11 +262,21 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         if (prefs) setSpeed(prefs.playbackSpeed);
         stateRef.current.sessionId = s.sessionId;
         stateRef.current.durationS = s.durationS;
-        const { index, withinS } = locate(s.tracks, s.currentTimeS);
+        // Read on this device a moment ago? The page you stopped on is where the audio starts (localSync.ts) — ahead of the
+        // server's copy, which only catches up after the reader's debounced save.
+        const local = readLocalPos(newItemId);
+        let startS = s.currentTimeS;
+        if (shouldAdoptForAudio(local, s.currentTimeS)) {
+          startS = Math.min(local.audioS, s.durationS);
+          autoResumedRef.current = true; // that outranks the server-based "you've read further" resume below
+          setResumeNotice(`Continued from where you were reading — ${formatTime(startS)}`);
+        }
+        const { index, withinS } = locate(s.tracks, startS);
         setTrackIndex(index);
-        setPositionS(s.currentTimeS);
-        stateRef.current.lastSyncPos = s.currentTimeS;
+        setPositionS(startS);
+        stateRef.current.lastSyncPos = startS; // an adopted jump is not listening time
         stateRef.current.knownServerS = s.currentTimeS;
+        stateRef.current.dirty = startS !== s.currentTimeS;
         pendingSeekRef.current = { withinS, thenPlay: false };
       })
       .catch((e) => {
@@ -476,13 +497,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   /** [fromServer]: the move is following another device's saved position, so it isn't a "jump" worth a "Left off"
    *  bookmark and there is nothing of ours to save. */
-  function seekTo(targetS: number, opts: { fromServer?: boolean } = {}) {
+  function seekTo(targetS: number, opts: { fromServer?: boolean; silent?: boolean; source?: "reader" } = {}) {
     if (!session) return;
     const clamped = Math.max(0, Math.min(session.durationS, targetS));
     const { index, withinS } = locate(session.tracks, clamped);
     const audio = audioRef.current;
     if (!audio) return;
-    if (!opts.fromServer) maybeAutoBookmark(positionRef.current, clamped);
+    if (!opts.fromServer && !opts.silent) maybeAutoBookmark(positionRef.current, clamped);
     if (index !== trackIndexRef.current) {
       const wasPlaying = !audio.paused;
       pendingSeekRef.current = { withinS, thenPlay: wasPlaying };
@@ -500,8 +521,48 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       stateRef.current.dirty = true;
       if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
       seekSaveTimerRef.current = setTimeout(() => void latestRef.current?.syncNow(), SEEK_SAVE_DELAY_MS);
+      // A move made in the player itself (skip, scrub, chapter) is the newest place on this device; one that came from the
+      // reader is already recorded as the reader's.
+      if (opts.source !== "reader") writeLocal(clamped);
     }
   }
+
+  /** Records where the audio is as the newest place on this device (read by the reader when it opens or comes back). */
+  function writeLocal(audioS: number) {
+    const id = itemIdRef.current;
+    if (!id) return;
+    const map = readAlongMapRef.current;
+    const total = session?.durationS || stateRef.current.durationS;
+    const progress = (map ? progressionAt(map, audioS) : null) ?? (total > 0 ? audioS / total : 0);
+    writeLocalPos(id, { audioS, progress, by: "player" });
+    lastLocalWriteRef.current = Date.now();
+  }
+
+  function seekFromReader(targetS: number) {
+    seekTo(targetS, { silent: true, source: "reader" });
+  }
+
+  // While playing, keep the on-device position fresh (about every 1.5 s) and note the exact spot on pause — so the reader,
+  // in this tab or another, opens on the sentence being narrated without asking the server.
+  useEffect(() => {
+    if (!itemId || !session) return;
+    if (isPlaying) {
+      playedRef.current = true;
+      if (Date.now() - lastLocalWriteRef.current >= 1500) writeLocal(positionS);
+    } else if (playedRef.current) {
+      writeLocal(positionRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionS, isPlaying, itemId, session]);
+
+  // Another tab's reader turned a page: follow it (this tab holds the audio).
+  useEffect(() => {
+    if (!itemId || !session) return;
+    return onLocalPosFromOtherTab(itemId, (p) => {
+      if (p.by === "reader" && Math.abs(p.audioS - positionRef.current) > 3) seekFromReader(Math.min(p.audioS, session.durationS));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemId, session]);
 
   function skip(deltaS: number) {
     seekTo(positionRef.current + deltaS);
@@ -662,6 +723,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     positionRef,
     play,
     seekTo,
+    seekFromReader,
     skip,
     skipChapter,
     chapters,
