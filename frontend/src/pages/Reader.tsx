@@ -4,7 +4,8 @@ import { HttpFetcher, Locator, LocatorLocations, LocatorText, Manifest, Publicat
 import { EpubNavigator, EpubNavigatorListeners } from "@readium/navigator";
 import { api, BookDetail, SyncMap } from "../api/client";
 import { useShell } from "../components/Shell";
-import { labelTocTitles } from "../lib/chapters";
+import { chapterBack, chapterForward, labelTocTitles, SkipTrail } from "../lib/chapters";
+import { ReadingTracker } from "../lib/readingTracker";
 import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
 import ReadAlongMaps from "../components/ReadAlongMaps";
@@ -236,6 +237,19 @@ export default function Reader() {
   const pageSpanRef = useRef(0.004);
   const lastTotalRef = useRef(0);
   const selfNavRef = useRef(false);
+  // Page and audiobook together (docs/SYNC_API.md §3): a page turned by the reader moves the audio to the page's
+  // first sentence, and the audio moving (playing, a skip, a scrub) moves the page. These keep the two from chasing
+  // each other: the time of the reader's last own move, the moment until which the audio's position is not to move
+  // the page (it is about to be set from the page), and the turn still waiting for the page's text.
+  const userMoveAtRef = useRef(0);
+  const audioSeekGuardUntilRef = useRef(0);
+  const pendingTurnRef = useRef<{ href: string; progression: number } | null>(null);
+  const pendingTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const readyRef = useRef(false); // the book has finished opening: later position changes are the reader's own
+  const jumpAtRef = useRef(0); // the last jump (contents, slider, bookmark, chapter): not a page read
+  const textSkipTrailRef = useRef<SkipTrail | null>(null);
+  const trackerRef = useRef<ReadingTracker | null>(null);
+  const wantPlayRef = useRef(false);
   const pagesRef = useRef<PageCount>(pages);
   // Readium's fixed-size position list from this load — stashed for the
   // auto-resume effect below, which runs later (once the map arrives) and
@@ -467,13 +481,26 @@ export default function Reader() {
               const text = loc.text.highlight?.trim() || null;
               pageTextRef.current = text;
               if (pendingRef.current) pendingRef.current.pageStart = text;
+              moveAudioToPage(text); // exact: the very sentence the page begins with
               return;
             }
             pageTextRef.current = null;
             const total = totalOf(loc);
             const step = total - lastTotalRef.current;
-            if (!selfNavRef.current && step > 0 && step < 0.05) pageSpanRef.current = step; // one page, as turned by hand
+            const selfNav = selfNavRef.current;
+            if (!selfNav && step > 0 && step < 0.05) pageSpanRef.current = step; // one page, as turned by hand
             selfNavRef.current = false;
+            if (readyRef.current && !selfNav) {
+              // The reader moved the page (a turn, a swipe, a jump): the audio is to follow it, and the page must not
+              // be pulled back by the audio in the meantime.
+              const now = Date.now();
+              userMoveAtRef.current = now;
+              audioSeekGuardUntilRef.current = now + 2500;
+              queueAudioMove(loc.href.toString(), loc.locations?.progression ?? 0);
+              // A page counts when it is the next one forward (not a jump, not going back, not flicking past).
+              if (step > 0 && step < 0.02 && now - jumpAtRef.current > 2000) trackerRef.current?.page();
+              else trackerRef.current?.activity();
+            }
             lastTotalRef.current = total;
             progressionRef.current = total;
             setFraction(total);
@@ -523,7 +550,12 @@ export default function Reader() {
           return;
         }
         navRef.current = nav;
+        trackerRef.current?.stop();
+        trackerRef.current = new ReadingTracker(itemId!, () => detail?.title || titleRef.current);
+        trackerRef.current.start();
         setLoading(false);
+        // The position changes that follow opening are the book arriving where it was left, not the reader's own.
+        window.setTimeout(() => { if (!cancelled) readyRef.current = true; }, 1500);
         if (resumeNote) flash(resumeNote, 4500);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't open this book.");
@@ -543,6 +575,11 @@ export default function Reader() {
       // reorders these effects later. One effect owning both leaves nothing
       // for ordering to get wrong.
       flushSave(itemId);
+      readyRef.current = false;
+      if (pendingTurnTimerRef.current) clearTimeout(pendingTurnTimerRef.current);
+      trackerRef.current?.flush(true);
+      trackerRef.current?.stop();
+      trackerRef.current = null;
       navRef.current?.destroy();
       navRef.current = null;
     };
@@ -556,10 +593,12 @@ export default function Reader() {
   // turns, so a two-page spread or a bigger font is accounted for); only when
   // the narration leaves that span does the page move. Turning a page yourself
   // pauses this briefly (pauseFollow) so it never fights you.
-  const followingThisBook = !!readAlongAnchorId && playback.itemId === readAlongAnchorId && playback.isPlaying;
+  const followingThisBook = !!readAlongAnchorId && playback.itemId === readAlongAnchorId && !!playback.session;
+  const togetherRef = useRef({ follow, map: readAlong.map, loaded: followingThisBook, seekTo: playback.seekTo });
+  togetherRef.current = { follow, map: readAlong.map, loaded: followingThisBook, seekTo: playback.seekTo };
   useEffect(() => {
     if (!follow || !readAlong.map || !followingThisBook) return;
-    if (Date.now() < followPausedUntilRef.current) return;
+    if (Date.now() < audioSeekGuardUntilRef.current) return; // the audio is being set from the page just turned
     const p = progressionAt(readAlong.map, playback.positionS);
     if (p === null) return;
     const here = progressionRef.current;
@@ -568,6 +607,7 @@ export default function Reader() {
     const target = locatorAtTime(readAlong.map, playback.positionS) ?? locatorAtTotal(p);
     if (!target) return;
     selfNavRef.current = true; // so this jump isn't mistaken for a page turn by hand
+    window.setTimeout(() => { selfNavRef.current = false; }, 1000); // a jump to the page already shown reports nothing
     navRef.current?.go(target, false, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback.positionS, follow, readAlong.map, followingThisBook]);
@@ -587,7 +627,13 @@ export default function Reader() {
   // seconds would be lost — and switching to the audiobook straight after reading would start it a page behind.
   useEffect(() => {
     if (!itemId) return;
-    const leave = () => flushSave(itemId, true);
+    const leave = () => {
+      flushSave(itemId, true);
+      trackerRef.current?.flush(true);
+    };
+    const onActive = () => trackerRef.current?.activity();
+    window.addEventListener("keydown", onActive);
+    window.addEventListener("pointerdown", onActive);
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         leave();
@@ -605,6 +651,8 @@ export default function Reader() {
     window.addEventListener("pagehide", leave);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      window.removeEventListener("keydown", onActive);
+      window.removeEventListener("pointerdown", onActive);
       window.removeEventListener("pagehide", leave);
       document.removeEventListener("visibilitychange", onVisibility);
     };
@@ -625,6 +673,28 @@ export default function Reader() {
   // The first text on the page being shown, once Readium has said (see positionChanged).
   const pageTextRef = useRef<string | null>(null);
   const awaitingTextRef = useRef(false);
+  const titleRef = useRef("");
+  titleRef.current = title;
+
+  /** The reader turned (or jumped) to a page: remember where, and — if the page's text never arrives — move the audio
+   *  from the page's progression instead. */
+  function queueAudioMove(href: string, progression: number) {
+    pendingTurnRef.current = { href, progression };
+    if (pendingTurnTimerRef.current) clearTimeout(pendingTurnTimerRef.current);
+    pendingTurnTimerRef.current = setTimeout(() => moveAudioToPage(null), 600);
+  }
+  /** Moves the audio to the page just turned to: the sentence the page begins with, else where its progression falls. */
+  function moveAudioToPage(pageText: string | null) {
+    const turn = pendingTurnRef.current;
+    const t = togetherRef.current;
+    if (!turn || !t.follow || !t.map || !t.loaded || Date.now() - userMoveAtRef.current > 4000) return;
+    pendingTurnRef.current = null;
+    if (pendingTurnTimerRef.current) clearTimeout(pendingTurnTimerRef.current);
+    const at = timeAtPage(t.map, turn.href, turn.progression, pageText);
+    if (at === null) return;
+    audioSeekGuardUntilRef.current = Date.now() + 2000;
+    t.seekTo(at);
+  }
   function queueSave(id: string, locator: Locator, total: number) {
     pendingRef.current = { locator, total, pageStart: null };
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -659,7 +729,10 @@ export default function Reader() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const target = locatorAtTotal(fraction);
     noSaveUntilRef.current = Date.now() + FOLLOW_NO_SAVE_MS;
-    if (target) navRef.current?.go(target, false, () => {});
+    if (target) {
+      selfNavRef.current = true; // not the reader's own move: the audio must not follow it
+      navRef.current?.go(target, false, () => {});
+    }
     flash(`Moved to ${Math.round(fraction * 100)}% — where you got to on another device`, 5000);
   }
 
@@ -785,6 +858,7 @@ export default function Reader() {
    *  accidental jump never loses your place. */
   function leftOffBeforeJump(to: number) {
     pauseFollow();
+    jumpAtRef.current = Date.now();
     const from = progressionRef.current;
     if (!store || Math.abs(to - from) <= JUMP_THRESHOLD) return;
     void dropLeftOff(store, bookmarks, from)
@@ -830,6 +904,64 @@ export default function Reader() {
     const target = locatorAtTotal(value);
     if (target) navRef.current?.go(target, true, () => {});
   }
+
+  // ── The one row of controls (Audex has the same) ─────────────────────────
+  /** Where each chapter of the table of contents starts, as a whole-book fraction, in reading order. */
+  function textChapterStarts(): { startS: number }[] {
+    const w = weightsRef.current;
+    if (!w) return [];
+    const starts = new Set<number>();
+    for (const t of toc) {
+      const at = w.hrefs.indexOf(t.href.split("#")[0]);
+      if (at >= 0) starts.add(w.starts[at] / w.total);
+    }
+    return [...starts].sort((a, b) => a - b).map((startS) => ({ startS }));
+  }
+
+  /** Previous (-1) / next (1) chapter. With the audiobook loaded and "together" on it is the audio's chapter and the page
+   *  follows; otherwise the text's. After skipping forward the first skip back returns to where you skipped from, the
+   *  next goes to the start of that chapter and the one after to the chapter before (the same as in the player). */
+  function skipChapter(direction: 1 | -1) {
+    jumpAtRef.current = Date.now();
+    if (follow && followingThisBook && readAlong.map) {
+      audioSeekGuardUntilRef.current = 0; // the audio moves now, and the page is to follow it
+      playback.skipChapter(direction);
+      return;
+    }
+    const chapters = textChapterStarts();
+    const pos = progressionRef.current;
+    const page = Math.max(pageSpanRef.current, 0.0005);
+    const r = direction > 0 ? chapterForward(chapters, pos) : chapterBack(chapters, pos, textSkipTrailRef.current, page * 1.5, page * 8);
+    textSkipTrailRef.current = r.trail;
+    if (r.target === null) return;
+    pauseFollow();
+    const target = locatorAtTotal(r.target);
+    if (target) navRef.current?.go(target, true, () => {});
+  }
+
+  function skipAudio(deltaS: number) {
+    audioSeekGuardUntilRef.current = 0; // the audio moves now, and the page is to follow it
+    playback.skip(deltaS);
+  }
+
+  /** Play / pause the audiobook from the reader. Not loaded yet: load it, and start as soon as it is. */
+  function togglePlay() {
+    if (!readAlongAnchorId) return;
+    if (followingThisBook) {
+      playback.togglePlayPause();
+      return;
+    }
+    wantPlayRef.current = true;
+    playback.play(readAlongAnchorId);
+  }
+  useEffect(() => {
+    if (!wantPlayRef.current || !followingThisBook) return;
+    wantPlayRef.current = false;
+    // The player sets the audio source in an effect of its own, which runs after this one.
+    const t = window.setTimeout(() => playback.togglePlayPause(), 400);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followingThisBook]);
 
   /** Navigate to the player at the point the text has reached — the reader-
    *  side half of the cross-format jump (docs/SYNC_API.md §3). */
@@ -1290,15 +1422,8 @@ export default function Reader() {
                 </button>
                 <label className="reader-ra-check">
                   <input type="checkbox" checked={follow} onChange={toggleFollow} />
-                  <span>Follow the audiobook while it plays</span>
+                  <span>Page and audiobook together</span>
                 </label>
-                <p className="reader-panel-note">
-                  {follow
-                    ? followingThisBook
-                      ? "Following the audio — the page turns to keep up. Turn a page yourself and it waits a few seconds."
-                      : "Start the audiobook (🎧 Listen) and the page will follow it."
-                    : "Off — the page stays where you leave it."}
-                </p>
                 {readAlongAnchorId && (
                   <ReadAlongMaps
                     itemId={readAlongAnchorId}
@@ -1381,6 +1506,41 @@ export default function Reader() {
             )}
           </div>
         )}
+        <div className="reader-transport" role="group" aria-label="Chapter and page controls">
+          <button className="reader-transport-chapter" onClick={act(() => setPanel((p) => (p === "chapters" ? null : "chapters")))} title="Contents">
+            {shownChapter ?? "Contents"}
+          </button>
+          <div className="reader-transport-row">
+            <button className="reader-font-btn" onClick={act(() => skipChapter(-1))} aria-label="Previous chapter" title="Previous chapter">⏮</button>
+            <button className="reader-font-btn" onClick={act(prevPage)} aria-label="Previous page" title="Previous page">‹</button>
+            {canAlign && (
+              <>
+                <button className="reader-font-btn" onClick={act(() => skipAudio(-30))} disabled={!followingThisBook} aria-label="Back 30 seconds" title="Back 30 seconds">⟲30</button>
+                <button
+                  className="reader-font-btn reader-transport-play"
+                  onClick={act(togglePlay)}
+                  aria-label={followingThisBook && playback.isPlaying ? "Pause" : "Play"}
+                  title={followingThisBook && playback.isPlaying ? "Pause" : "Play the audiobook"}
+                >
+                  {followingThisBook && playback.isPlaying ? "⏸" : "▶"}
+                </button>
+                <button className="reader-font-btn" onClick={act(() => skipAudio(30))} disabled={!followingThisBook} aria-label="Forward 30 seconds" title="Forward 30 seconds">30⟳</button>
+              </>
+            )}
+            <button className="reader-font-btn" onClick={act(nextPage)} aria-label="Next page" title="Next page">›</button>
+            <button className="reader-font-btn" onClick={act(() => skipChapter(1))} aria-label="Next chapter" title="Next chapter">⏭</button>
+            {canAlign && raReady && (
+              <button
+                className={"reader-font-btn" + (follow ? " active" : "")}
+                onClick={act(toggleFollow)}
+                aria-pressed={follow}
+                title={follow ? "Page and audiobook move together (click to turn off)" : "Page and audiobook are independent (click to turn on)"}
+              >
+                ⇄
+              </button>
+            )}
+          </div>
+        </div>
         <div className="reader-controls">
           <button
             className="reader-font-btn"

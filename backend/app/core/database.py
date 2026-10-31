@@ -1,7 +1,7 @@
 import time
 from typing import AsyncGenerator
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -129,6 +129,22 @@ class EditionLink(Base):
     a_id = Column(String, nullable=False)
     b_id = Column(String, nullable=False)
     kind = Column(String, nullable=False)  # join | split
+
+
+class ReadingStat(Base):
+    """How much a person read, per day and book: pages turned forward one at a time and the minutes the reader was
+    actually in use. Counted by the reader in the browser and added here (api/stats.py); listening comes from
+    Audiobookshelf itself, so it isn't stored. `day` is the person's own local date (YYYY-MM-DD)."""
+    __tablename__ = "reading_stats"
+    __table_args__ = (UniqueConstraint("identity_id", "day", "item_id", name="uq_reading_stats_day_item"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=False, index=True)
+    day = Column(String, nullable=False)
+    item_id = Column(String, nullable=False)  # namespaced id, as at the API boundary
+    title = Column(String, nullable=False, default="")
+    pages = Column(Integer, nullable=False, default=0)
+    seconds = Column(Float, nullable=False, default=0.0)
 
 
 class ActivityLog(Base):

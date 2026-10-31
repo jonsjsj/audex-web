@@ -5,7 +5,8 @@ import { useReadAlong } from "./useReadAlong";
 import { progressionAt } from "./syncMap";
 import { audioTimeOfSavedReading } from "./readingSpot";
 import { tagTitle } from "./bookmarkTitle";
-import { chapterIndexAt, LabeledChapter, nextChapterStart, previousChapterStart } from "./chapters";
+import { chapterBack, chapterForward, chapterIndexAt, LabeledChapter, SkipTrail } from "./chapters";
+import { loadBackUpOnResumeS } from "./playbackPrefs";
 import { useBookChapters } from "./useBookChapters";
 import { useHeardChapters } from "./useHeardChapters";
 
@@ -441,8 +442,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, chapterLabel]);
 
+  // When playback last stopped (null = not since this book was loaded), for "back up on resume" above.
+  const pausedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    if (isPlaying) pausedAtRef.current = null;
+    else if (stateRef.current.sessionId) pausedAtRef.current = Date.now();
   }, [isPlaying]);
 
   // ── Auto-resume from reading, if you've read further than you've listened ──
@@ -507,10 +512,14 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     seekTo(positionRef.current + deltaS);
   }
 
+  // After skipping a chapter forward, the first skip back returns to the spot you skipped from; the next goes to the
+  // start of that chapter and the one after to the chapter before it (docs/CHAPTERS.md "Skipping chapters").
+  const skipTrailRef = useRef<SkipTrail | null>(null);
   function skipChapter(direction: 1 | -1) {
     const chapters = chaptersRef.current;
-    const target = direction > 0 ? nextChapterStart(chapters, positionRef.current) : previousChapterStart(chapters, positionRef.current);
-    if (target !== null) seekTo(target);
+    const r = direction > 0 ? chapterForward(chapters, positionRef.current) : chapterBack(chapters, positionRef.current, skipTrailRef.current);
+    skipTrailRef.current = r.trail;
+    if (r.target !== null) seekTo(r.target);
   }
 
   function togglePlayPause() {
@@ -520,12 +529,28 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       audio.pause();
       return;
     }
-    const start = () => audio.play().catch(() => setError("Playback failed — try again."));
+    // Back up a little on resuming so you hear the end of what you last heard: as many seconds as you were away, up to
+    // the limit set in Settings (a long break no longer costs a fixed 30 s; a short one almost nothing). Not after the
+    // place was just moved by another device, and never past the start.
+    const start = (moved: boolean = false) => {
+      const awayS = pausedAtRef.current === null ? Infinity : (Date.now() - pausedAtRef.current) / 1000;
+      const back = Math.min(loadBackUpOnResumeS(), awayS < 3 ? 0 : awayS);
+      if (!moved && back > 0 && positionRef.current > back && stateRef.current.sessionId) {
+        const to = positionRef.current - back;
+        const { index, withinS } = locate(session?.tracks ?? [], to);
+        if (index === trackIndexRef.current) audio.currentTime = withinS;
+        else seekTo(to, { fromServer: true }); // a different track: the ordinary seek swaps it
+        setPositionS(to);
+        positionRef.current = to;
+        stateRef.current.lastSyncPos = to;
+      }
+      void audio.play().catch(() => setError("Playback failed — try again."));
+    };
     // A tab that has been open a while may be behind another device: look first (at most ~1 s), then play from
     // wherever the book really is — never start from a stale place and save it over the newer one.
     if (Date.now() - lastCheckRef.current > PLAY_CHECK_AFTER_MS && stateRef.current.sessionId) {
       const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200));
-      void Promise.race([pickUp(), timeout]).then(start, start);
+      void Promise.race([pickUp(), timeout]).then((moved) => start(moved), () => start());
     } else {
       start();
     }

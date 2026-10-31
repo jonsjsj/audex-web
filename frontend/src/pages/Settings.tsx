@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AbsServerInfo, ActivityEntry, api, DiagnosticCheck, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
+import { BACK_UP_CHOICES, loadBackUpOnResumeS, saveBackUpOnResumeS } from "../lib/playbackPrefs";
 
 interface ChangelogEntry {
   version: string;
@@ -471,6 +472,28 @@ export default function Settings() {
             />
           </div>
         )}
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Playback</h2>
+        <div className="settings-row">
+          <label className="settings-row-label" htmlFor="back-up-on-resume">
+            Back up on resume
+          </label>
+          <select
+            id="back-up-on-resume"
+            className="reader-ap-select"
+            title="The most Play steps back after a pause"
+            defaultValue={loadBackUpOnResumeS()}
+            onChange={(e) => saveBackUpOnResumeS(Number(e.target.value))}
+          >
+            {BACK_UP_CHOICES.map((s) => (
+              <option key={s} value={s}>
+                {s === 0 ? "Off" : `${s} s`}
+              </option>
+            ))}
+          </select>
+        </div>
       </section>
 
       <section className="settings-section">

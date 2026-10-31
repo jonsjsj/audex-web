@@ -405,6 +405,12 @@ export const api = {
   discardReadProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/read/${itemId}/position`, { method: "DELETE" }),
 
+  /** Hours listened (Audiobookshelf's own record) and pages read (counted by the reader) — see lib/stats.ts. */
+  stats: () => request<import("../lib/stats").StatsData>("/api/stats"),
+  /** Adds to today's reading totals for a book; [keepalive] lets it finish while the tab is closing. */
+  addReading: (body: { itemId: string; title: string; day: string; pages: number; seconds: number }, opts?: { keepalive?: boolean }) =>
+    request<{ ok: true }>("/api/stats/reading", { method: "POST", body: JSON.stringify(body), keepalive: opts?.keepalive }),
+
   settings: () => request<UserPrefs>("/api/settings"),
   updateSettings: (body: Partial<UserPrefs>) =>
     request<UserPrefs>("/api/settings", { method: "PUT", body: JSON.stringify(body) }),

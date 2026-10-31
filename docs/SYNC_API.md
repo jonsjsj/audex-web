@@ -398,7 +398,12 @@ Mirrors `codexaudio`'s `AlignmentRepository` interface:
    `progression` → character → time. Audio → reading opens the chapter on the sentence being narrated (its text, with
    the character depth as fallback). A server that echoes our own upload back (same %, a coarser location) must not
    replace the saved exact locator.
-6. Cross-format position: **furthest-progress-wins** between the two
+6. **Page and audiobook together** (Audex 0.4.64, Webdex 0.9.2). With a map and the audiobook loaded, turning a page
+   (or a jump: contents, slider, chapter) sets the audio to the page's first sentence, playing or paused, and any move of
+   the audio (skip, scrub, chapter, playing on) turns the page to it. A move made by one side is not echoed back by the
+   other: for ~2 s after a page-driven audio seek the audio does not move the page, and a page turn that was itself
+   caused by the audio is never taken as the reader's. One switch turns both directions off.
+7. Cross-format position: **furthest-progress-wins** between the two
    editions of the same work, same principle as Codex's own cross-edition
    sync (§2) — don't let the map turn into a second, competing source of
    truth for "where you are"; it's a *lookup table* between two already-

@@ -14,6 +14,7 @@ import Player from "./pages/Player";
 import Series from "./pages/Series";
 import SeriesDetail from "./pages/SeriesDetail";
 import Settings from "./pages/Settings";
+import Stats from "./pages/Stats";
 import { PlaybackProvider } from "./lib/PlaybackContext";
 
 // @readium/navigator + @readium/shared pull in ~330kB of code (ReadiumCSS
@@ -76,6 +77,7 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route path="stats" element={<Stats />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       </Routes>

@@ -68,6 +68,20 @@ async def me(base_url: str, token: str) -> dict | None:
     return r.json() if r.status_code == 200 else None
 
 
+async def listening_stats(base_url: str, token: str) -> dict:
+    """GET /api/me/listening-stats → `{totalTime, days: {"YYYY-MM-DD": seconds}, items: {id: {timeListening,
+    mediaMetadata: {title}}}, …}`: everything this person has listened to, on every device, since the start."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f"{_base(base_url)}/api/me/listening-stats", headers=_auth(token))
+    except httpx.HTTPError:
+        raise AbsError("Couldn't reach Audiobookshelf for your listening history.")
+    if r.status_code != 200:
+        raise AbsError("Couldn't load your listening history.")
+    data = r.json()
+    return data if isinstance(data, dict) else {}
+
+
 # ─── Library browsing (Phase 1) ────────────────────────────────────────────
 
 async def libraries(base_url: str, token: str) -> list[dict]:

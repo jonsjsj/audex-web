@@ -151,11 +151,38 @@ export function chapterIndexAt(chapters: { startS: number }[], positionS: number
 
 /** Where "previous chapter" goes: the start of this chapter, or — within the first few seconds of it — the one
  *  before. Null when there is nowhere to go. */
-export function previousChapterStart(chapters: { startS: number }[], positionS: number): number | null {
+export function previousChapterStart(chapters: { startS: number }[], positionS: number, nearStart = 3): number | null {
   const i = chapterIndexAt(chapters, positionS);
   if (i < 0) return null;
-  if (positionS - chapters[i].startS > 3 || i === 0) return chapters[i].startS;
+  if (positionS - chapters[i].startS > nearStart || i === 0) return chapters[i].startS;
   return chapters[i - 1].startS;
+}
+
+/** Where a chapter skip forward landed and where it came from. Works on any scale (seconds in the audio, a fraction of
+ *  the book in the text) — the callers say how wide "still right there" is. */
+export interface SkipTrail {
+  from: number;
+  landed: number;
+}
+
+/** Skip forward: the chapter after this one, and the trail that lets the first skip back undo it. */
+export function chapterForward(chapters: { startS: number }[], position: number): { target: number | null; trail: SkipTrail | null } {
+  const target = nextChapterStart(chapters, position);
+  return { target, trail: target === null ? null : { from: position, landed: target } };
+}
+
+/** Skip back, forgiving a slip: straight after a skip forward (still at the start of the chapter it landed on, within
+ *  [slack]) the first skip back returns to the spot you skipped from; the next goes to the start of that chapter, and the
+ *  one after to the chapter before it ([nearStart] says how close to a chapter's start counts as "at the start"). */
+export function chapterBack(
+  chapters: { startS: number }[],
+  position: number,
+  trail: SkipTrail | null,
+  nearStart = 3,
+  slack = 15,
+): { target: number | null; trail: SkipTrail | null } {
+  if (trail && position >= trail.landed - nearStart && position <= trail.landed + slack) return { target: trail.from, trail: null };
+  return { target: previousChapterStart(chapters, position, nearStart), trail: null };
 }
 
 /** Where "next chapter" goes, or null at the last chapter. */

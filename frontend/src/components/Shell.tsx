@@ -191,6 +191,9 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
           <NavLink to="/narrators" className="shell-nav-link">
             Narrators
           </NavLink>
+          <NavLink to="/stats" className="shell-nav-link">
+            Stats
+          </NavLink>
         </nav>
 
         <div className="shell-sync">

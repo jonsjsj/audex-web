@@ -7,6 +7,32 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.2] - 2026-10-31
+
+### Added
+- **Stats.** A new Stats page (in the side menu): hours listened and pages read — today, this week, this month and all
+  time — and the history by day, week, month, year or book. A Records view shows your best week, month and year for
+  listening and for pages, your current and longest streak of days, your busiest day and weekday (with a chart of every
+  weekday), what you do on a day you do it, your reading pace in pages per hour, and how your time splits between
+  listening and reading. Listening comes from Audiobookshelf, so it includes every device since the start. Pages are
+  counted by the reader as you turn them one at a time (jumping, going back and flicking past pages don't count),
+  starting now — earlier reading has no page record.
+- **One row of controls in the reader**, like the Audex app: previous chapter, previous page, 30 s back, play, 30 s
+  forward, next page, next chapter, with the chapter's name above (it opens the contents). With an audiobook the
+  chapter buttons move the page and the audio together; without one they move the text.
+- **Back up on resume.** Settings → Playback: the most Play steps back after a pause (off, 5, 10 or 30 s). It steps
+  back as far as you were away, up to that limit — the default is 10 s.
+
+### Changed
+- **The page and the audiobook move together.** Turn a page and the narration jumps to the first words on it, playing or
+  paused; move the audio (the 30 s buttons, a chapter skip, the scrubber) and the page follows. Before, the page only
+  followed while the audio was playing, and a page turn didn't move the audio. The switch (⇄ in the reader's control
+  row, and "Page and audiobook together" in the Read-along panel) turns both directions off.
+- **A chapter skip that forgives a slip.** After skipping a chapter forward, the first skip back returns you to the spot
+  you skipped from, the second goes to the start of that chapter, and the third to the start of the one before — in the
+  player and in the reader.
+- The Read-along panel lost its explanatory paragraphs; the controls say what they do.
+
 ## [0.9.1] - 2026-10-19
 
 ### Fixed

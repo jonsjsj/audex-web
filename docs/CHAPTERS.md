@@ -70,6 +70,9 @@ buttons: `[ ⏮ ] [ ⟲30 ] [ ▶ ] [ ⟳30 ] [ ⏭ ]`.
 
 * **Next** goes to the start of the next chapter (disabled on the last one).
 * **Previous** goes to the start of the current chapter — or, within its first 3 seconds, to the one before.
+* **A slip is forgiven.** Right after a skip forward, the first Previous returns to the spot you skipped from; the next
+  goes to the start of that chapter and the one after to the chapter before it. Listening on for more than ~15 s (or
+  moving some other way) ends this. The same in the reader's text (a few pages of reading ends it).
 * A book with no chapters: both disabled. Webdex also wires the OS media-session previous/next track to these.
 * A jump of 2 minutes or more drops the usual automatic "Left off" bookmark (see BOOKMARKS.md).
 
