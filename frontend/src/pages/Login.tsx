@@ -33,7 +33,7 @@ export default function Login() {
     <div className="centerpane">
       <div className="card">
         <h1 className="brand">
-          Aud<em>ex</em>
+          Web<em>dex</em>
         </h1>
         <p className="sub">Your library, player, and read-along — in the browser.</p>
 

@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, { 
         <div className="centerpane">
           <div className="card" style={{ textAlign: "center" }}>
             <h1 className="brand">
-              Aud<em>ex</em>
+              Web<em>dex</em>
             </h1>
             <p className="sub">Something went wrong. It's been reported automatically.</p>
             <button className="btn btn-primary" onClick={() => window.location.assign("/")}>

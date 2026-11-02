@@ -9,6 +9,8 @@ import { ReadingTracker } from "../lib/readingTracker";
 import { usePlayback } from "../lib/PlaybackContext";
 import { useReadAlong } from "../lib/useReadAlong";
 import ReadAlongMaps from "../components/ReadAlongMaps";
+import DictionarySheet from "../components/DictionarySheet";
+import { loadLookupOn, lookupTerm, saveLookupOn } from "../lib/dictionary";
 import {
   clampFont,
   DEFAULT_APPEARANCE,
@@ -329,7 +331,8 @@ export default function Reader() {
     if (action === KEY_NEXT) nextPage();
     else if (action === KEY_PREV) prevPage();
     else if (action === KEY_ESCAPE) {
-      if (panel) setPanel(null);
+      if (lookup) setLookup(null);
+      else if (panel) setPanel(null);
       else if (immersive) exitImmersive();
     } else if (action === KEY_FULLSCREEN) {
       if (immersive) exitImmersive();
@@ -338,6 +341,31 @@ export default function Reader() {
       void addBookmarkHere();
     }
   };
+
+  // Look up a word the reader selects (a double-click, or a long-press on a phone). Latest handler is kept in a ref
+  // because the navigator's listeners below outlive the render that created them.
+  const [lookupOn, setLookupOn] = useState(loadLookupOn);
+  const [lookup, setLookup] = useState<string | null>(null);
+  const lookupOnRef = useRef(lookupOn);
+  lookupOnRef.current = lookupOn;
+  const lookedUpRef = useRef({ term: "", at: 0 });
+  const selectedRef = useRef((_text: string) => {});
+  selectedRef.current = (text: string) => {
+    if (!lookupOnRef.current) return;
+    const term = lookupTerm(text);
+    if (!term) return;
+    const now = Date.now();
+    if (lookedUpRef.current.term === term && now - lookedUpRef.current.at < 1200) return; // pointer-up and selection-change both report it
+    lookedUpRef.current = { term, at: now };
+    setLookup(term);
+  };
+  function toggleLookup() {
+    setLookupOn((v) => {
+      saveLookupOn(!v);
+      return !v;
+    });
+    setLookup(null);
+  }
 
   useEffect(() => {
     if (!itemId || !containerRef.current) return;
@@ -463,7 +491,26 @@ export default function Reader() {
         }
 
         const listeners: EpubNavigatorListeners = {
-          frameLoaded: () => {},
+          frameLoaded: (wnd) => {
+            // A long-press on a phone selects a word without a pointer-up, so also watch the selection itself — but
+            // only for touch, where it settles by itself; with a mouse it changes all through a drag.
+            try {
+              const doc = wnd.document;
+              let touch = false;
+              let timer = 0;
+              doc.addEventListener("pointerdown", (e) => { touch = e.pointerType === "touch"; });
+              doc.addEventListener("selectionchange", () => {
+                window.clearTimeout(timer);
+                if (!touch) return;
+                timer = window.setTimeout(() => {
+                  const sel = wnd.getSelection();
+                  if (sel && !sel.isCollapsed) selectedRef.current(sel.toString());
+                }, 500);
+              });
+            } catch {
+              /* a frame we can't reach: the navigator's own pointer-up report still works */
+            }
+          },
           positionChanged: (locator) => {
             // `nav` (the closure variable, not navRef) isn't assigned until
             // the `new EpubNavigator(...)` call below RETURNS — if this
@@ -495,6 +542,7 @@ export default function Reader() {
               // be pulled back by the audio in the meantime.
               const now = Date.now();
               userMoveAtRef.current = now;
+              setLookup(null);
               audioSeekGuardUntilRef.current = now + 2500;
               queueAudioMove(loc.href.toString(), loc.locations?.progression ?? 0);
               // A page counts when it is the next one forward (not a jump, not going back, not flicking past).
@@ -526,7 +574,7 @@ export default function Reader() {
           scroll: () => {},
           customEvent: () => {},
           handleLocator: () => false,
-          textSelected: () => {},
+          textSelected: (selection) => selectedRef.current(selection.text),
           contentProtection: () => {},
           contextMenu: () => {},
           peripheral: (data) => actionRef.current(data.type),
@@ -1244,7 +1292,8 @@ export default function Reader() {
 
       {/* Bottom bar: a thin progress line is always there; the controls appear
           when the mouse is over it (or focus is inside it, or a list is open). */}
-      <div className={`reader-bottom ${panel ? "open" : ""}`}>
+      <div className={`reader-bottom ${panel || lookup ? "open" : ""}`}>
+        {lookup && !panel && <DictionarySheet word={lookup} onClose={() => setLookup(null)} onLookup={setLookup} />}
         {toast && (
           <div className="reader-toast" role="status">
             {toast}
@@ -1404,6 +1453,10 @@ export default function Reader() {
                 Sample text
               </span>
             </div>
+            <label className="reader-ra-check">
+              <input type="checkbox" checked={lookupOn} onChange={toggleLookup} />
+              <span>Look up selected words</span>
+            </label>
             <div className="reader-ap-row">
               <button className="reader-font-btn" onClick={act(() => updateAppearance({ ...DEFAULT_APPEARANCE }))}>
                 Reset to defaults

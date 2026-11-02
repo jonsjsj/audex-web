@@ -155,7 +155,7 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
       <aside className={`shell-sidebar ${navOpen ? "open" : ""}`}>
         <div className="shell-brandrow">
           <button className="brand shell-brand shell-brand-btn" onClick={goHome} aria-label="Back to start">
-            Aud<em>ex</em>
+            Web<em>dex</em>
           </button>
           <button className="shell-collapse" onClick={toggleCollapsed} aria-label="Hide menu" title="Hide menu">
             «

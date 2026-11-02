@@ -408,6 +408,8 @@ export const api = {
   /** Hours listened (Audiobookshelf's own record) and pages read (counted by the reader) — see lib/stats.ts. */
   stats: () => request<import("../lib/stats").StatsData>("/api/stats"),
   /** Adds to today's reading totals for a book; [keepalive] lets it finish while the tab is closing. */
+  /** The meaning of a word (404 when no dictionary has it) — see lib/dictionary.ts. */
+  define: (word: string) => request<import("../lib/dictionary").DictionaryEntry>(`/api/dictionary?word=${encodeURIComponent(word)}`),
   addReading: (body: { itemId: string; title: string; day: string; pages: number; seconds: number }, opts?: { keepalive?: boolean }) =>
     request<{ ok: true }>("/api/stats/reading", { method: "POST", body: JSON.stringify(body), keepalive: opts?.keepalive }),
 

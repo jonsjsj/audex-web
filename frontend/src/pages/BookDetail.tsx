@@ -304,7 +304,33 @@ export default function BookDetail() {
       </button>
 
       <div className="book-detail-top">
-        <img className="book-detail-cover" src={book.coverUrl} alt="" />
+        <div className="book-detail-coverbox">
+          <img className="book-detail-cover" src={book.coverUrl} alt="" />
+          {(audioTargetId || ebookTargetId) && (
+            <div className="book-detail-cta">
+              {audioTargetId && (
+                <button
+                  className="book-detail-cta-btn book-detail-cta-listen"
+                  onClick={() => navigate(`/play/${audioTargetId}`)}
+                  title={book.audioProgress > 0.001 ? "Resume listening" : "Listen"}
+                >
+                  <span aria-hidden>🎧</span> Listen
+                  {book.audioProgress > 0.001 && <small>{Math.round(book.audioProgress * 100)}%</small>}
+                </button>
+              )}
+              {ebookTargetId && (
+                <button
+                  className="book-detail-cta-btn book-detail-cta-read"
+                  onClick={() => navigate(`/read/${ebookTargetId}`)}
+                  title={book.ebookProgress > 0.001 ? "Resume reading" : "Read"}
+                >
+                  <span aria-hidden>📖</span> Read
+                  {book.ebookProgress > 0.001 && <small>{Math.round(book.ebookProgress * 100)}%</small>}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="book-detail-meta">
           <h1 className="book-detail-title">{book.title}</h1>
           {book.subtitle && <p className="book-detail-subtitle">{book.subtitle}</p>}
@@ -354,16 +380,6 @@ export default function BookDetail() {
           )}
 
           <div className="book-detail-actions">
-            {audioTargetId && (
-              <button className="btn btn-primary" style={{ width: "auto" }} onClick={() => navigate(`/play/${audioTargetId}`)}>
-                {book.audioProgress > 0.001 ? "Resume listening" : "Listen"}
-              </button>
-            )}
-            {ebookTargetId && (
-              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => navigate(`/read/${ebookTargetId}`)}>
-                {book.ebookProgress > 0.001 ? "Resume reading" : "Read"}
-              </button>
-            )}
             <ArrMonitor itemId={book.id} />
             <button className="btn btn-secondary" style={{ width: "auto" }} onClick={() => setEditing((v) => !v)}>
               Edit details

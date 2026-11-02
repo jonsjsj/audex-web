@@ -7,6 +7,20 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.3] - 2026-11-02
+
+### Added
+- **Dictionary.** Select a word in the reader (double-click, or long-press on a phone) and its meaning opens: how it is
+  spelled and pronounced (with a button to hear it), each part of speech with its senses, an example and similar words
+  — tap one to look it up. A box in the card looks up any other word. Words are looked up through the server, so your
+  address never reaches the dictionary sites. Appearance → "Look up selected words" switches it off.
+
+### Changed
+- **Listen and Read on the cover.** A book's page now has the two buttons on the cover itself, the same size and
+  side by side, with how far you are in each; a book with only one of them shows just that one.
+- **Webdex.** The browser tab, the menu and the sign-in page now say Webdex, and the address is
+  https://webdex.bellaybestia.no (the old audexweb address redirects to it).
+
 ## [0.9.2] - 2026-10-31
 
 ### Added
