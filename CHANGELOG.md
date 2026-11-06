@@ -7,6 +7,12 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.4] - 2026-11-06
+
+### Changed
+- **Another device read on: you are asked.** When Audex or another tab has read further than you, the reader no longer
+  moves the page by itself. A small bar offers "Go there" or "Stay here"; staying keeps your place.
+
 ## [0.9.3] - 2026-11-02
 
 ### Added

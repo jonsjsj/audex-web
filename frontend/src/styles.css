@@ -1987,6 +1987,34 @@ input:focus {
   box-shadow: var(--shadow);
   pointer-events: none;
 }
+/* The same pill, with two answers: another device read on, go there or stay. */
+.reader-ask {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.reader-ask button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, var(--paper) 45%, transparent);
+  border-radius: 999px;
+  padding: 0.12rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+.reader-ask .reader-ask-go {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1b150b;
+  font-weight: 600;
+}
+.reader-ask button:hover,
+.reader-ask button:focus-visible {
+  filter: brightness(1.15);
+  outline: none;
+}
 .reader-progress-pct {
   font-family: var(--mono);
   font-size: 0.72rem;

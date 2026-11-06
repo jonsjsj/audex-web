@@ -219,6 +219,8 @@ export default function Reader() {
   const [store, setStore] = useState<BookmarkStore | null>(null);
   const [bookmarks, setBookmarks] = useState<ReaderBookmark[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  // Set when another device has read on past this tab's place (the fraction it reached): the reader is asked, not moved.
+  const [elsewhere, setElsewhere] = useState<number | null>(null);
   const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
   const hasAudio = (bookDetail?.numAudioFiles ?? 0) > 0;
   // Mirrors progressPct as a raw 0..1 fraction — progressPct is rounded for
@@ -770,18 +772,30 @@ export default function Reader() {
       .catch(() => {});
   }
 
-  /** Another device has read on since this tab last looked: go to where it got to, and say so. */
+  /** Another device has read on since this tab last looked: ask whether to go there. The page never moves by itself —
+   *  the reader may be mid-sentence, or have gone back on purpose. */
   function followOtherDevice(fraction: number) {
-    knownProgressRef.current = fraction;
     pendingRef.current = null;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    setElsewhere(fraction);
+  }
+  /** "Go there": move to the other device's place. */
+  function goElsewhere() {
+    const fraction = elsewhere;
+    setElsewhere(null);
+    if (fraction === null) return;
+    knownProgressRef.current = fraction;
     const target = locatorAtTotal(fraction);
     noSaveUntilRef.current = Date.now() + FOLLOW_NO_SAVE_MS;
     if (target) {
       selfNavRef.current = true; // not the reader's own move: the audio must not follow it
       navRef.current?.go(target, false, () => {});
     }
-    flash(`Moved to ${Math.round(fraction * 100)}% — where you got to on another device`, 5000);
+  }
+  /** "Stay": keep this place. The next page turn here replaces the other device's saved place. */
+  function stayHere() {
+    if (elsewhere !== null) knownProgressRef.current = elsewhere;
+    setElsewhere(null);
   }
 
   /** A deliberate move by the reader: don't let following the audio yank the
@@ -1294,10 +1308,20 @@ export default function Reader() {
           when the mouse is over it (or focus is inside it, or a list is open). */}
       <div className={`reader-bottom ${panel || lookup ? "open" : ""}`}>
         {lookup && !panel && <DictionarySheet word={lookup} onClose={() => setLookup(null)} onLookup={setLookup} />}
-        {toast && (
-          <div className="reader-toast" role="status">
-            {toast}
+        {elsewhere !== null ? (
+          <div className="reader-toast reader-ask" role="alertdialog" aria-label="Another device read on">
+            <span>Another device is at {Math.round(elsewhere * 100)}%</span>
+            <button className="reader-ask-go" onClick={goElsewhere}>
+              Go there
+            </button>
+            <button onClick={stayHere}>Stay here</button>
           </div>
+        ) : (
+          toast && (
+            <div className="reader-toast" role="status">
+              {toast}
+            </div>
+          )
         )}
         {panel === "chapters" && (
           <div className="reader-panel" role="dialog" aria-label="Chapters">
