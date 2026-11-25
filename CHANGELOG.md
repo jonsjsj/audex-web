@@ -7,6 +7,33 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.10.0] - 2026-11-25
+
+What Webdex picks up from the Audex app.
+
+### Added
+- **Word-by-word read-along.** With a read-along map and the audiobook playing, the reader marks the sentence being
+  read and lights up each word as it's spoken. On by default; Settings → Reading → "Read-along highlight" turns it off.
+- **Marks on the sliders.** The reader's bookmark marks can be tapped to jump there, and both the player and the reader
+  show a faint mark at the furthest point you've reached (in either format) — tap it to go back to it. It disappears
+  once the book is finished.
+- **Podcasts (optional — off until you switch it on in Settings → Extras).** A Podcasts page with the shows in your
+  Audiobookshelf podcast libraries and their episodes, which play in the normal player and keep their own place.
+  "Check for new episodes", "Hide played", and "＋ Add a show": search by name or paste an RSS address, preview it,
+  and subscribe (Audiobookshelf then downloads new episodes by itself). Subscribing needs an Audiobookshelf account
+  with upload rights.
+- **Colours from the cover (optional — Settings → Extras).** The accent colour follows the cover of the book or show
+  you're looking at, else the one playing — a deeper shade on a light screen, a lighter one on a dark screen.
+
+### Changed
+- **A finished book starts again from the beginning** — in the player and the reader — instead of opening on its last
+  minute or last page ("You'd finished this one — starting again from the beginning").
+- **The ebook keeps pace while you listen.** As the audiobook plays, the ebook's saved % moves forward with it, so the
+  two percentages agree even if you never open the ebook. It only moves forward, never past the audio, and never to
+  the end (finishing is the audiobook's call). Opening the ebook then lands on the sentence being listened to.
+- **ⓘ instead of explanations everywhere.** The book page, player, reader panels, read-along maps and Settings show a
+  short label with an ⓘ; the explanation opens when you tap it.
+
 ## [0.9.5] - 2026-11-25
 
 ### Fixed

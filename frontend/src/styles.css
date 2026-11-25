@@ -2332,6 +2332,22 @@ input:focus {
   align-items: center;
   gap: 0.45rem;
 }
+.info-label-row > p,
+.info-label-row > span,
+.info-label-row > div,
+.info-label-row > label {
+  margin: 0;
+}
+/* In a Settings row the label + its explanation take the room; the switch sits at the right edge. */
+.settings-row > .info-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-row > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+}
 .settings-section-head-info {
   margin-bottom: 0.7rem;
 }
@@ -2770,6 +2786,11 @@ input:focus {
   gap: 0.8rem;
 }
 .podcast-hide-finished {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-weight: 500;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
@@ -2891,6 +2912,7 @@ input:focus {
   align-items: center;
   gap: 0.4rem;
   font-size: 0.88rem;
+  font-weight: 500;
   margin: 0.4rem 0;
 }
 .player-episode-notes {
