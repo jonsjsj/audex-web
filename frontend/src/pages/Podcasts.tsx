@@ -5,6 +5,7 @@ import { useShell } from "../components/Shell";
 import { WithInfo } from "../components/InfoTip";
 import { usePlayback, formatTime } from "../lib/PlaybackContext";
 import { formatDay } from "../lib/dates";
+import { useViewedCover } from "../lib/coverTint";
 
 /** Podcasts (optional — Settings → Extras → Podcasts; Audex has the same). The shows are your Audiobookshelf podcast
  *  libraries; episodes play in the normal player and keep their own place. */
@@ -89,6 +90,7 @@ export function PodcastShowPage() {
   const navigate = useNavigate();
   const playback = usePlayback();
   const [show, setShow] = useState<PodcastDetail | null>(null);
+  useViewedCover(show?.coverUrl);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [note, setNote] = useState<string | null>(null);

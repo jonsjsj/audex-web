@@ -7,6 +7,7 @@ import { api, Book, BookDetail as BookDetailModel } from "../api/client";
 import { useShell } from "../components/Shell";
 import ArrMonitor from "../components/ArrMonitor";
 import { WithInfo } from "../components/InfoTip";
+import { useViewedCover } from "../lib/coverTint";
 
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
@@ -234,6 +235,7 @@ export default function BookDetail() {
   const navigate = useNavigate();
   const { libraryId, syncSignal } = useShell();
   const [book, setBook] = useState<BookDetailModel | null>(null);
+  useViewedCover(book?.coverUrl);
   const [nextInSeries, setNextInSeries] = useState<Book | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);

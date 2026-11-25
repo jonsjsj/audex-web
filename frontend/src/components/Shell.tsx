@@ -3,6 +3,33 @@ import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "rea
 import { api, Library as LibraryModel, Me, SyncResult } from "../api/client";
 import MiniPlayer from "./MiniPlayer";
 import { useSwitches } from "../lib/prefs";
+import { usePlayback } from "../lib/PlaybackContext";
+import { applyTint, tintOf, useViewedCoverValue } from "../lib/coverTint";
+
+/** Settings → Extras → "Colours from the cover": the accent follows the cover being looked at, else the one playing. */
+function CoverTint() {
+  const { coverColors } = useSwitches();
+  const playback = usePlayback();
+  const viewed = useViewedCoverValue();
+  const url = coverColors ? viewed ?? playback.book?.coverUrl ?? null : null;
+  useEffect(() => {
+    if (!url) {
+      applyTint(null);
+      return;
+    }
+    let alive = true;
+    const paint = () => void tintOf(url).then((t) => alive && applyTint(t));
+    paint();
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    mq?.addEventListener?.("change", paint); // the shade depends on light/dark
+    return () => {
+      alive = false;
+      mq?.removeEventListener?.("change", paint);
+    };
+  }, [url]);
+  useEffect(() => () => applyTint(null), []);
+  return null;
+}
 
 // The sentinel library selection: one merged view across every book library,
 // the same "one catalog across libraries" the mobile app builds. Real ABS
@@ -243,6 +270,7 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
       </main>
 
       <MiniPlayer />
+      <CoverTint />
     </div>
   );
 }
