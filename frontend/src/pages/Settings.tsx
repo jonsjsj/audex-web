@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { AbsServerInfo, ActivityEntry, api, DiagnosticCheck, UpdateCheck } from "../api/client";
 import { useShell } from "../components/Shell";
 import { BACK_UP_CHOICES, loadBackUpOnResumeS, saveBackUpOnResumeS } from "../lib/playbackPrefs";
+import { setSwitch, useSwitches } from "../lib/prefs";
+import { InfoLabel } from "../components/InfoTip";
 
 interface ChangelogEntry {
   version: string;
@@ -40,6 +42,7 @@ export default function Settings() {
   const [codexBusy, setCodexBusy] = useState(false);
   const [codexError, setCodexError] = useState<string | null>(null);
   const [useCodexMeta, setUseCodexMeta] = useState(true);
+  const switches = useSwitches();
   const [codexInfoOpen, setCodexInfoOpen] = useState(false);
   const [updateCapable, setUpdateCapable] = useState(false);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
@@ -493,6 +496,51 @@ export default function Settings() {
               </option>
             ))}
           </select>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Reading</h2>
+        <div className="settings-row">
+          <InfoLabel label="Read-along highlight" htmlFor="ra-highlight">
+            While the audiobook plays with the book open, the sentence being read is marked and each word lights up
+            as it's spoken. Needs a read-along map for the book (🎧 in the reader).
+          </InfoLabel>
+          <input
+            id="ra-highlight"
+            type="checkbox"
+            checked={switches.readAlongHighlight}
+            onChange={(e) => void setSwitch("readAlongHighlight", e.target.checked).catch(() => {})}
+          />
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h2 className="settings-section-title">Extras</h2>
+        <div className="settings-row">
+          <InfoLabel label="Podcasts" htmlFor="sw-podcasts">
+            Adds a Podcasts page: the shows in your Audiobookshelf podcast libraries, their episodes (played in the
+            normal player, with your place kept), and finding new shows by search or RSS address to subscribe to.
+            Subscribing needs an Audiobookshelf account that may add to libraries.
+          </InfoLabel>
+          <input
+            id="sw-podcasts"
+            type="checkbox"
+            checked={switches.podcasts}
+            onChange={(e) => void setSwitch("podcasts", e.target.checked).catch(() => {})}
+          />
+        </div>
+        <div className="settings-row">
+          <InfoLabel label="Colours from the cover" htmlFor="sw-cover-colors">
+            Tints the app's accent colour from the cover of the book you're playing or looking at. Off: the usual
+            colours everywhere.
+          </InfoLabel>
+          <input
+            id="sw-cover-colors"
+            type="checkbox"
+            checked={switches.coverColors}
+            onChange={(e) => void setSwitch("coverColors", e.target.checked).catch(() => {})}
+          />
         </div>
       </section>
 

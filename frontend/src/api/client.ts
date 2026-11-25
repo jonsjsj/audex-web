@@ -192,6 +192,12 @@ export interface UserPrefs {
   readerAppearance?: import("../lib/readerAppearance").ReaderAppearance;
   /** Show Codex's checked metadata (fixed author/series/year/…) where Codex has one. */
   useCodexMeta?: boolean;
+  /** Light up each word in the reader as the audiobook speaks it (needs a read-along map). On by default. */
+  readAlongHighlight?: boolean;
+  /** Optional: podcasts (browse, subscribe, play). Off by default. */
+  podcasts?: boolean;
+  /** Optional: tint the app's colours from the cover of what's playing. Off by default. */
+  coverColors?: boolean;
 }
 
 /** Where a book stands in Codex's connected book downloader (Chaptarr/Readarr) — see /api/arr. */

@@ -33,7 +33,9 @@ import {
   toEpubPreferences,
   usePrefersDark,
 } from "../lib/readerAppearance";
-import { progressionAt, textTargetAt, timeAtPage, timeAtProgression } from "../lib/syncMap";
+import { entryAt, progressionAt, textTargetAt, timeAtPage, timeAtProgression } from "../lib/syncMap";
+import { clearHighlight, paintHighlight } from "../lib/readAlongHighlight";
+import { useSwitches } from "../lib/prefs";
 import { buildSpineWeights, locationFromTotal, SpineWeights, totalFromLocation } from "../lib/readerProgress";
 import {
   absStore,
@@ -681,6 +683,63 @@ export default function Reader() {
     navRef.current?.go(target, false, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback.positionS, follow, readAlong.map, followingThisBook]);
+
+  // ── Word-by-word highlight ────────────────────────────────────────────
+  // While this book's audiobook is loaded with a map, the sentence being read is marked and the spoken word lights
+  // up (Settings → "Read-along highlight"). Smooth between the audio's own time updates (a few a second) by running
+  // the clock on from the last one while playing.
+  const switches = useSwitches();
+  const highlightOn = switches.readAlongHighlight && !!readAlong.map && followingThisBook;
+  useEffect(() => {
+    const frameWin = () => {
+      try {
+        return navRef.current?._cframes?.[0]?.window ?? null;
+      } catch {
+        return null;
+      }
+    };
+    if (!highlightOn) {
+      clearHighlight(frameWin());
+      return;
+    }
+    const map = readAlong.map!;
+    let raf = 0;
+    let lastPos = playback.positionRef.current;
+    let lastAt = performance.now();
+    const tick = () => {
+      const pos = playback.positionRef.current;
+      const now = performance.now();
+      if (pos !== lastPos) {
+        lastPos = pos;
+        lastAt = now;
+      }
+      const t = playback.isPlaying ? pos + Math.min(0.6, ((now - lastAt) / 1000) * playback.speed) : pos;
+      const win = frameWin();
+      const href = navRef.current?.currentLocator?.href?.toString();
+      const entry = entryAt(map, t);
+      if (win && href && entry) {
+        try {
+          paintHighlight(win, href, map, entry, t);
+        } catch {
+          /* a frame being replaced mid-paint: the next frame paints again */
+        }
+      }
+      if (playback.isPlaying) raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightOn, readAlong.map, playback.isPlaying, playback.speed, playback.positionS]);
+  useEffect(
+    () => () => {
+      try {
+        clearHighlight(navRef.current?._cframes?.[0]?.window);
+      } catch {
+        /* gone */
+      }
+    },
+    [],
+  );
 
   function toggleFollow() {
     setFollow((v) => {

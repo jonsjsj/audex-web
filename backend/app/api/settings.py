@@ -87,6 +87,9 @@ def _out(row: UserSettings) -> dict:
         "playbackSpeed": row.playback_speed, "readerFontSize": row.reader_font_size,
         "useCodexMeta": row.use_codex_meta is not False,
         "readerAppearance": clean_appearance(stored, row.reader_font_size or 100.0),
+        "readAlongHighlight": row.read_along_highlight is not False,
+        "podcasts": row.podcasts_enabled is True,
+        "coverColors": row.cover_colors is True,
     }
 
 
@@ -95,6 +98,9 @@ class UpdateSettingsBody(BaseModel):
     readerFontSize: float | None = None
     useCodexMeta: bool | None = None
     readerAppearance: dict | None = None
+    readAlongHighlight: bool | None = None
+    podcasts: bool | None = None
+    coverColors: bool | None = None
 
 
 @router.put("")
@@ -110,6 +116,12 @@ async def update_settings(
         row.reader_font_size = max(50.0, min(300.0, body.readerFontSize))
     if body.useCodexMeta is not None:
         row.use_codex_meta = body.useCodexMeta
+    if body.readAlongHighlight is not None:
+        row.read_along_highlight = body.readAlongHighlight
+    if body.podcasts is not None:
+        row.podcasts_enabled = body.podcasts
+    if body.coverColors is not None:
+        row.cover_colors = body.coverColors
     if body.readerAppearance is not None:
         clean = clean_appearance(body.readerAppearance, row.reader_font_size or 100.0)
         row.reader_appearance = json.dumps(clean)

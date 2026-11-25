@@ -115,6 +115,12 @@ class UserSettings(Base):
     # Reader appearance (size, theme, font, colours) as JSON — the model in docs/READER_APPEARANCE.md,
     # shared with the Audex app. NULL = defaults (size from reader_font_size, theme follows the system).
     reader_appearance = Column(String, nullable=True)
+    # Light up each word in the reader as the audiobook speaks it (read-along with a map). On by default, as in Audex.
+    read_along_highlight = Column(Boolean, default=True)
+    # Optional extras, OFF until switched on in Settings: podcasts (browse, subscribe, play) and app colours
+    # tinted from the cover of what's playing.
+    podcasts_enabled = Column(Boolean, default=False)
+    cover_colors = Column(Boolean, default=False)
 
 
 class EditionLink(Base):
@@ -175,6 +181,12 @@ def _add_missing_columns(sync_conn) -> None:
         sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN use_codex_meta BOOLEAN DEFAULT TRUE"))
     if "reader_appearance" not in cols:
         sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN reader_appearance VARCHAR"))
+    if "read_along_highlight" not in cols:
+        sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN read_along_highlight BOOLEAN DEFAULT TRUE"))
+    if "podcasts_enabled" not in cols:
+        sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN podcasts_enabled BOOLEAN DEFAULT FALSE"))
+    if "cover_colors" not in cols:
+        sync_conn.execute(text("ALTER TABLE user_settings ADD COLUMN cover_colors BOOLEAN DEFAULT FALSE"))
 
 
 async def init_db() -> None:

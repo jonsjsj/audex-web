@@ -2326,6 +2326,20 @@ input:focus {
   border-color: var(--ink-soft);
 }
 
+/* A label with its ⓘ, and the explanation it opens (components/InfoTip.tsx). */
+.info-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.info-text {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0.3rem 0 0.2rem;
+  max-width: 42rem;
+}
+
 /* A plain text link-button (expand/collapse the full changelog). */
 .settings-link-btn {
   background: none;
