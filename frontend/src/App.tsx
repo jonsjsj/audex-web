@@ -11,6 +11,8 @@ import Login from "./pages/Login";
 import NarratorDetail from "./pages/NarratorDetail";
 import Narrators from "./pages/Narrators";
 import Player from "./pages/Player";
+import Podcasts, { PodcastShowPage } from "./pages/Podcasts";
+import { useSwitches } from "./lib/prefs";
 import Series from "./pages/Series";
 import SeriesDetail from "./pages/SeriesDetail";
 import Settings from "./pages/Settings";
@@ -77,10 +79,24 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route path="podcasts" element={<PodcastsGate><Podcasts /></PodcastsGate>} />
+        <Route path="podcasts/:itemId" element={<PodcastsGate><PodcastShowPage /></PodcastsGate>} />
         <Route path="stats" element={<Stats />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       </Routes>
     </PlaybackProvider>
   );
+}
+
+/** Podcasts are optional (Settings → Extras); while they're off the pages say how to turn them on. */
+function PodcastsGate({ children }: { children: JSX.Element }) {
+  const { podcasts } = useSwitches();
+  if (!podcasts)
+    return (
+      <p className="sub" style={{ padding: "1.5rem" }}>
+        Podcasts are off. Turn them on in Settings → Extras → Podcasts.
+      </p>
+    );
+  return children;
 }

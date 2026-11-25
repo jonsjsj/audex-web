@@ -128,17 +128,19 @@ _SUPPORTED_MIME_TYPES = [
 ]
 
 
-async def start_play(base_url: str, token: str, item_id: str) -> dict:
+async def start_play(base_url: str, token: str, item_id: str, episode_id: str | None = None) -> dict:
     """POST /api/items/{id}/play → a session with the resume position ABS already
-    computed (`currentTime`), the audio track list, and chapters."""
+    computed (`currentTime`), the audio track list, and chapters. A podcast episode plays the same way, with the
+    episode in the path (`/play/{episodeId}`); its session is then synced/closed exactly like a book's."""
+    path = f"/api/items/{item_id}/play" + (f"/{episode_id}" if episode_id else "")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
-            f"{_base(base_url)}/api/items/{item_id}/play",
+            f"{_base(base_url)}{path}",
             headers=_auth(token),
             json={"supportedMimeTypes": _SUPPORTED_MIME_TYPES, "mediaPlayer": "audex-web"},
         )
     if r.status_code != 200:
-        raise AbsError("Couldn't start playback for this book.")
+        raise AbsError("Couldn't start playback for this episode." if episode_id else "Couldn't start playback for this book.")
     return r.json()
 
 

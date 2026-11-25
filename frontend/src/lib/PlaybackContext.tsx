@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, Bookmark, BookDetail, Chapter, PlaySession, PlaySyncBody } from "../api/client";
+import { api, Bookmark, BookDetail, Chapter, PlaySession, PlaySyncBody, PodcastEpisodeInfo } from "../api/client";
 import { useReadAlong } from "./useReadAlong";
 import { progressionAt } from "./syncMap";
 import { audioTimeOfSavedReading } from "./readingSpot";
@@ -95,7 +95,10 @@ interface PlaybackState {
   // Not React.RefObject<number> — that type allows `current: null`, which
   // this ref never actually is (initialized to 0, always a real number).
   positionRef: { readonly current: number };
-  play: (itemId: string) => void;
+  /** [episodeId]: a podcast episode of that item (Settings → Extras → Podcasts). */
+  play: (itemId: string, episodeId?: string | null) => void;
+  /** The podcast episode playing, or null for a book. */
+  episodeId: string | null;
   seekTo: (targetS: number) => void;
   skip: (deltaS: number) => void;
   /** Previous (-1) / next (1) chapter: previous restarts the current chapter, or goes back one near its start. */
@@ -137,11 +140,48 @@ export function usePlayback(): PlaybackState {
  *  etc. while listening doesn't unmount the audio element the way it used to
  *  when this all lived inside the Player page component. Player.tsx and
  *  MiniPlayer.tsx are both just views over this same state now. */
+/** A podcast episode, shaped like a book for the player (title = the episode, author = the show). */
+function episodeAsBook(itemId: string, ep: PodcastEpisodeInfo): BookDetail {
+  return {
+    id: itemId,
+    title: ep.title,
+    subtitle: null,
+    author: ep.podcastTitle,
+    series: null,
+    durationS: ep.durationS,
+    mediaType: "podcast",
+    hasEbook: false,
+    numAudioFiles: 1,
+    coverUrl: ep.coverUrl,
+    progress: ep.progress,
+    isFinished: ep.isFinished,
+    lastUpdate: ep.lastUpdate,
+    audioProgress: ep.progress,
+    ebookProgress: 0,
+    audioTimeS: ep.currentTimeS,
+    addedAt: null,
+    publishedYear: null,
+    pairedItemId: null,
+    chapters: [],
+    description: ep.description,
+    narrator: null,
+    publisher: null,
+    genres: [],
+    language: null,
+    isbn: null,
+    asin: null,
+    authorList: [],
+    narratorList: [],
+    seriesList: [],
+  };
+}
+
 export function PlaybackProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const [itemId, setItemId] = useState<string | null>(null);
+  const [episodeId, setEpisodeId] = useState<string | null>(null);
   const [book, setBook] = useState<BookDetail | null>(null);
   const [session, setSession] = useState<PlaySession | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -179,7 +219,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // `knownServerS` is the position Audiobookshelf held when we last looked or wrote — sent with every save so the
   // server can refuse to replace a newer place another device has saved (progress_guard.py). `dirty` is "played or
   // moved since the last confirmed save".
-  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "" });
+  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "", episodeId: "" });
   // The latest of everything an event listener or timer (registered once) needs, so none runs on a stale render.
   const itemIdRef = useRef<string | null>(null);
   const isPlayingRef = useRef(false);
@@ -223,8 +263,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
    *  open first — this is the ONLY place a session gets closed short of an
    *  explicit discard or the tab actually closing, since playback is now
    *  meant to survive ordinary in-app navigation. */
-  function play(newItemId: string) {
-    if (newItemId === itemId && (session || error)) {
+  function play(newItemId: string, newEpisodeId: string | null = null) {
+    if (newItemId === itemId && (newEpisodeId ?? null) === episodeId && (session || error)) {
       // Already loaded — but this tab may have sat for hours while another device moved on: look before resuming.
       if (!isPlayingRef.current) void latestRef.current?.pickUp();
       return;
@@ -238,10 +278,12 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         durationS: prev.durationS,
         knownServerS: prev.knownServerS,
         ebookItemId: prev.ebookItemId || undefined,
+        episodeId: prev.episodeId || undefined,
       });
     }
     if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
     setItemId(newItemId);
+    setEpisodeId(newEpisodeId);
     setBook(null);
     setSession(null);
     setError(null);
@@ -250,15 +292,16 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setMovedFrom(null);
     explicitJumpRef.current = false;
     autoResumedRef.current = false;
-    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "" };
+    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "", episodeId: "" };
     setSyncStatus({ savedAt: null, failing: false });
     lastCheckRef.current = Date.now();
 
     const token = ++loadTokenRef.current;
     Promise.all([
-      api.item(newItemId),
-      api.play(newItemId),
-      api.bookmarks(newItemId).catch(() => []),
+      newEpisodeId ? api.podcastEpisode(newItemId, newEpisodeId).then((ep) => episodeAsBook(newItemId, ep)) : api.item(newItemId),
+      api.play(newItemId, newEpisodeId),
+      // Audiobookshelf keeps bookmarks per item, not per episode — none for episodes.
+      newEpisodeId ? Promise.resolve([] as Bookmark[]) : api.bookmarks(newItemId).catch(() => [] as Bookmark[]),
       api.settings().catch(() => null),
     ])
       .then(([b, s, marks, prefs]) => {
@@ -271,6 +314,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         stateRef.current.durationS = s.durationS;
         // The ebook of this work (same item, or its paired one): its saved % keeps pace as you listen (server side).
         stateRef.current.ebookItemId = b.hasEbook ? newItemId : (b.pairedItemId ?? "");
+        stateRef.current.episodeId = newEpisodeId ?? "";
         const { index, withinS } = locate(s.tracks, s.currentTimeS);
         setTrackIndex(index);
         setPositionS(s.currentTimeS);
@@ -308,7 +352,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const st = stateRef.current;
       const id = itemIdRef.current;
       if (!st.sessionId || !id) return;
-      closeBeacon(id, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined });
+      closeBeacon(id, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined, episodeId: st.episodeId || undefined });
     };
     window.addEventListener("pagehide", onUnload);
     return () => window.removeEventListener("pagehide", onUnload);
@@ -325,7 +369,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (elsewhereRef.current && !opts.beacon) return;
     const pos = positionRef.current;
     const listened = Math.max(0, pos - st.lastSyncPos);
-    const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined };
+    const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined, episodeId: st.episodeId || undefined };
     const prevLast = st.lastSyncPos;
     st.timeListenedS += listened;
     st.lastSyncPos = pos;
@@ -415,7 +459,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     pickingUpRef.current = true;
     lastCheckRef.current = Date.now();
     try {
-      const p = await api.audioPosition(id);
+      const p = await api.audioPosition(id, st.episodeId || null);
       if (itemIdRef.current !== id || stateRef.current !== st || p.currentTimeS === null) return false;
       if (Math.abs(p.currentTimeS - st.knownServerS) <= MOVED_ELSEWHERE_S) return false;
       if (Math.abs(p.currentTimeS - positionRef.current) <= MOVED_ELSEWHERE_S) {
@@ -684,7 +728,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   /** Fire-and-forget, and deliberately silent on failure — an auto-bookmark
    *  is a background safety net, not a user-requested action. */
   function maybeAutoBookmark(fromS: number, toS: number) {
-    if (!itemId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
+    if (!itemId || episodeId || fromS < 1.0 || Math.abs(toS - fromS) < AUTO_BOOKMARK_JUMP_S) return;
     // Named like the Audex player names its own: where you were.
     const title = `Left off · ${formatTime(fromS)}`;
     api
@@ -730,6 +774,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     loadTokenRef.current++; // invalidate any in-flight play() so it can't land after this
     audioRef.current?.pause();
     setItemId(null);
+    setEpisodeId(null);
     setBook(null);
     setSession(null);
     setBookmarks([]);
@@ -738,6 +783,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
 
   const value: PlaybackState = {
     itemId,
+    episodeId,
     book,
     session,
     error,

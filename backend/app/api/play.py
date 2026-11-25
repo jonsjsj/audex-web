@@ -28,12 +28,13 @@ stream_router = APIRouter(prefix="/api/stream", tags=["play"])
 @router.post("/{item_id}")
 async def play(
     item_id: str,
+    episodeId: str | None = None,
     identity: Identity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ):
     conn, abs_id = await resolve(identity, db, item_id)
     try:
-        session = await abs_client.start_play(conn.base_url, conn.token, abs_id)
+        session = await abs_client.start_play(conn.base_url, conn.token, abs_id, episodeId)
     except AbsError as e:
         raise HTTPException(502, str(e))
     tracks = session.get("audioTracks", [])
@@ -41,7 +42,7 @@ async def play(
         {"id": c.get("id", 0), "startS": c.get("start", 0.0), "endS": c.get("end", 0.0), "title": c.get("title", "")}
         for c in session.get("chapters", [])
     ]
-    if not chapters:
+    if not chapters and not episodeId:
         chapters = await synthesized_chapters(abs_id)   # no markers in the file: use the ones Codex heard
     duration = sum(t.get("duration", 0.0) for t in tracks)
     resume = session.get("currentTime", 0.0)
@@ -49,7 +50,7 @@ async def play(
     # ABS's flag OR within the last ~0.5% / 30 s — the flag doesn't always survive syncing between clients.
     restarted = False
     try:
-        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id) or {}
+        prog = await abs_client.get_progress(conn.base_url, conn.token, _progress_id(abs_id, episodeId)) or {}
     except (AbsError, httpx.HTTPError):
         prog = {}
     if finished_audio(prog, resume, duration):
@@ -78,6 +79,11 @@ async def play(
     }
 
 
+def _progress_id(abs_id: str, episode_id: str | None) -> str:
+    """ABS keeps an episode's progress under item/episode (/api/me/progress/{item}/{episode})."""
+    return f"{abs_id}/{episode_id}" if episode_id else abs_id
+
+
 def finished_audio(prog: dict, resume_s: float, duration_s: float) -> bool:
     """Is this audiobook finished? ABS's flag, or its progress at 99.5%+, or the resume point within 30 s of the end."""
     if prog.get("isFinished"):
@@ -98,6 +104,8 @@ class SyncBody(BaseModel):
     knownServerS: float | None = None
     # The work's ebook (this item or its pair) — its saved % keeps pace with the audio (ebook_pace.py).
     ebookItemId: str | None = None
+    # A podcast episode being played (its progress lives under item/episode; Codex tracks books, not episodes).
+    episodeId: str | None = None
 
 
 async def _keep_ebook_pace(identity: Identity, db: AsyncSession, item_id: str, conn, abs_id: str, body: SyncBody,
@@ -127,7 +135,7 @@ async def _moved_elsewhere(conn, abs_id: str, body: SyncBody) -> float | None:
     if body.knownServerS is None:
         return None
     try:
-        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
+        prog = await abs_client.get_progress(conn.base_url, conn.token, _progress_id(abs_id, body.episodeId))
     except (AbsError, httpx.HTTPError):
         return None  # can't tell: behave as before rather than lose a position
     stored = (prog or {}).get("currentTime")
@@ -169,7 +177,7 @@ async def sync(
         raise HTTPException(502, f"Couldn't save your position to Audiobookshelf: {reason}")
     # Codex only knows the PRIMARY server's items (it computes book-keys from
     # its own ABS connection), so only push those — and with the real abs id.
-    if codex_token and conn.is_primary:
+    if codex_token and conn.is_primary and not body.episodeId:
         ok, why = await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
             library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
@@ -215,7 +223,7 @@ async def close(
     await _keep_ebook_pace(identity, db, item_id, conn, abs_id, body, force=True)
     mins = int(body.currentTimeS // 60)
     await activity.record(identity.id, "audiobookshelf", "Listening position saved", True, f"at {mins // 60}h {mins % 60:02d}m")
-    if codex_token and conn.is_primary:
+    if codex_token and conn.is_primary and not body.episodeId:
         ok, why = await codex_client.push_audio_progress(
             settings.CODEX_URL, codex_token,
             library_item_id=abs_id, current_time_s=body.currentTimeS, is_finished=_is_finished(body),
@@ -227,6 +235,7 @@ async def close(
 @router.get("/{item_id}/position")
 async def audio_position(
     item_id: str,
+    episodeId: str | None = None,
     identity: Identity = Depends(get_current_identity),
     db: AsyncSession = Depends(get_db),
 ):
@@ -234,7 +243,7 @@ async def audio_position(
     asks before playing, to pick up wherever another device has got to."""
     conn, abs_id = await resolve(identity, db, item_id)
     try:
-        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id)
+        prog = await abs_client.get_progress(conn.base_url, conn.token, _progress_id(abs_id, episodeId))
     except AbsError as e:
         raise HTTPException(502, str(e))
     cur = (prog or {}).get("currentTime")

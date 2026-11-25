@@ -13,6 +13,7 @@ from app.api import activity as activity_api, admin, arr as arr_api, auth, chapt
 # Settings instance imported right below) would otherwise collide on the
 # same name in this module's namespace.
 from app.api import settings as settings_api
+from app.api import podcasts as podcasts_api
 from app.core.config import oidc_active, settings
 from app.core.database import init_db
 
@@ -30,6 +31,7 @@ app.include_router(auth.router)
 app.include_router(chapters_api.router)
 app.include_router(library.router)
 app.include_router(play.router)
+app.include_router(podcasts_api.router)
 app.include_router(play.stream_router)
 app.include_router(read.router)
 app.include_router(readalong.router)

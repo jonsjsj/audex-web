@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { api, Library as LibraryModel, Me, SyncResult } from "../api/client";
 import MiniPlayer from "./MiniPlayer";
+import { useSwitches } from "../lib/prefs";
 
 // The sentinel library selection: one merged view across every book library,
 // the same "one catalog across libraries" the mobile app builds. Real ABS
@@ -67,6 +68,7 @@ function loadCollapsed(): boolean {
  *  page, and it's one less back-button to build per page. */
 export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChanged: () => void; onSignedOut: () => void }) {
   const navigate = useNavigate();
+  const switches = useSwitches();
   const location = useLocation();
   const [libraries, setLibraries] = useState<LibraryModel[] | null>(null);
   const [libraryId, setLibraryId] = useState<string>(ALL_LIBRARIES);
@@ -191,6 +193,11 @@ export default function Shell({ me, onChanged, onSignedOut }: { me: Me; onChange
           <NavLink to="/narrators" className="shell-nav-link">
             Narrators
           </NavLink>
+          {switches.podcasts && (
+            <NavLink to="/podcasts" className="shell-nav-link">
+              Podcasts
+            </NavLink>
+          )}
           <NavLink to="/stats" className="shell-nav-link">
             Stats
           </NavLink>

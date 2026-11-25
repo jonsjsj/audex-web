@@ -296,6 +296,66 @@ export interface PlaySyncBody {
   knownServerS?: number;
   /** The work's ebook (this item or its pair): its saved % is nudged forward to keep pace with the audio. */
   ebookItemId?: string;
+  /** A podcast episode being played. */
+  episodeId?: string;
+}
+export interface PodcastShow {
+  id: string;
+  title: string;
+  author: string | null;
+  coverUrl: string;
+  numEpisodes: number;
+  autoDownload: boolean;
+  library: string;
+  serverName?: string;
+}
+export interface PodcastTarget {
+  id: string;
+  name: string;
+  serverName?: string;
+  canSubscribe: boolean;
+}
+export interface PodcastEpisode {
+  id: string;
+  title: string;
+  publishedAt: number | null;
+  season: string | null;
+  episode: string | null;
+  durationS: number;
+  description: string | null;
+  currentTimeS: number;
+  progress: number;
+  isFinished: boolean;
+  lastUpdate: number | null;
+}
+export interface PodcastDetail extends PodcastShow {
+  description: string | null;
+  feedUrl: string | null;
+  episodes: PodcastEpisode[];
+}
+export interface PodcastEpisodeInfo extends PodcastEpisode {
+  podcastId: string;
+  podcastTitle: string;
+  author: string | null;
+  coverUrl: string;
+}
+export interface PodcastFound {
+  title: string;
+  author: string | null;
+  coverUrl: string | null;
+  feedUrl: string;
+  episodes: number;
+  genres: string[];
+  description: string | null;
+}
+export interface PodcastFeedPreview {
+  title: string;
+  author: string | null;
+  coverUrl: string | null;
+  feedUrl: string;
+  description: string | null;
+  episodes: number;
+  latest: { title: string; publishedAt: number | null }[];
 }
 export interface PlaySyncResult {
   ok: true;
@@ -370,7 +430,8 @@ export const api = {
   narrators: (libraryId: string) =>
     request<BookGroup[]>(`/api/library/narrators?libraryId=${encodeURIComponent(libraryId)}`),
 
-  play: (itemId: string) => request<PlaySession>(`/api/play/${itemId}`, { method: "POST" }),
+  play: (itemId: string, episodeId?: string | null) =>
+    request<PlaySession>(`/api/play/${itemId}${episodeId ? `?episodeId=${encodeURIComponent(episodeId)}` : ""}`, { method: "POST" }),
   /** [knownServerS] is the position this device last knew Audiobookshelf held; when another device has saved a
    *  different one since, nothing is written and the answer says `skipped` with the newer place. */
   sync: (itemId: string, body: PlaySyncBody) =>
@@ -378,8 +439,29 @@ export const api = {
   close: (itemId: string, body: PlaySyncBody) =>
     request<PlaySyncResult>(`/api/play/${itemId}/close`, { method: "POST", body: JSON.stringify(body) }),
   /** Where Audiobookshelf holds the listening position right now (null when the book was never played). */
-  audioPosition: (itemId: string) =>
-    request<{ currentTimeS: number | null; updatedAt: number | null }>(`/api/play/${itemId}/position`),
+  audioPosition: (itemId: string, episodeId?: string | null) =>
+    request<{ currentTimeS: number | null; updatedAt: number | null }>(
+      `/api/play/${itemId}/position${episodeId ? `?episodeId=${encodeURIComponent(episodeId)}` : ""}`,
+    ),
+  // ── Podcasts (optional — Settings → Extras) ──
+  podcasts: () => request<{ shows: PodcastShow[]; targets: PodcastTarget[] }>("/api/podcasts"),
+  podcast: (itemId: string) => request<PodcastDetail>(`/api/podcasts/${itemId}`),
+  podcastEpisode: (itemId: string, episodeId: string) =>
+    request<PodcastEpisodeInfo>(`/api/podcasts/${itemId}/episodes/${encodeURIComponent(episodeId)}`),
+  podcastCheckNew: (itemId: string) => request<{ ok: true; newEpisodes: number }>(`/api/podcasts/${itemId}/check-new`, { method: "POST" }),
+  podcastSearch: (term: string) =>
+    request<{ results: PodcastFound[] }>(`/api/podcasts/find/search?term=${encodeURIComponent(term)}`),
+  podcastFeed: (rssFeed: string) =>
+    request<PodcastFeedPreview>("/api/podcasts/find/feed", { method: "POST", body: JSON.stringify({ rssFeed }) }),
+  podcastSubscribe: (body: {
+    target: string;
+    feedUrl: string;
+    title: string;
+    author?: string | null;
+    description?: string | null;
+    imageUrl?: string | null;
+    autoDownload: boolean;
+  }) => request<{ ok: true; id: string | null }>("/api/podcasts/subscribe", { method: "POST", body: JSON.stringify(body) }),
   discardAudioProgress: (itemId: string) =>
     request<{ ok: true }>(`/api/play/${itemId}/progress`, { method: "DELETE" }),
   bookmarks: (itemId: string) => request<Bookmark[]>(`/api/play/${itemId}/bookmarks`),

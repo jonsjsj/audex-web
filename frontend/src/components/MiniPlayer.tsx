@@ -12,13 +12,14 @@ export default function MiniPlayer() {
 
   if (!playback.itemId || !playback.book || !playback.session) return null;
   if (location.pathname === `/play/${playback.itemId}`) return null;
+  const playerHref = `/play/${playback.itemId}${playback.episodeId ? `?episode=${encodeURIComponent(playback.episodeId)}` : ""}`;
 
   const { book, session, positionS } = playback;
   const progressFrac = session.durationS > 0 ? positionS / session.durationS : 0;
 
   return (
     <div className="mini-player" role="complementary" aria-label="Now playing">
-      <button className="mini-player-body" onClick={() => navigate(`/play/${playback.itemId}`)}>
+      <button className="mini-player-body" onClick={() => navigate(playerHref)}>
         <img className="mini-player-cover" src={book.coverUrl} alt="" />
         <div className="mini-player-info">
           <span className="mini-player-title">{book.title}</span>

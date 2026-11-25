@@ -66,10 +66,12 @@ export default function Player() {
 
   // Starts (or confirms) playback for whatever book this URL names — a
   // no-op in the context if it's already the one loaded/loading.
+  // A podcast episode comes as ?episode=<id> (Podcasts page).
+  const urlEpisodeId = searchParams.get("episode");
   useEffect(() => {
-    if (urlItemId) playback.play(urlItemId);
+    if (urlItemId) playback.play(urlItemId, urlEpisodeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlItemId]);
+  }, [urlItemId, urlEpisodeId]);
 
   // A read-along "jump to audio" link (Reader.tsx) arrives as ?atTime=<s> —
   // applied once the right book's session has actually loaded, not before.
@@ -160,7 +162,9 @@ export default function Player() {
     }
   }
 
-  const loaded = playback.book && playback.session && playback.itemId === urlItemId;
+  const loaded =
+    playback.book && playback.session && playback.itemId === urlItemId && playback.episodeId === (urlEpisodeId ?? null);
+  const isEpisode = !!urlEpisodeId;
 
   if (playback.error && playback.itemId === urlItemId) {
     return (
@@ -213,7 +217,10 @@ export default function Player() {
           <h1 className="player-title">{book!.title}</h1>
           <div className="player-byline">
             {book!.author && (
-              <button className="player-byline-link" onClick={() => navigate(`/authors/${encodeURIComponent(book!.author!)}`)}>
+              <button
+                className="player-byline-link"
+                onClick={() => navigate(isEpisode ? `/podcasts/${urlItemId}` : `/authors/${encodeURIComponent(book!.author!)}`)}
+              >
                 {book!.author}
               </button>
             )}
@@ -367,10 +374,12 @@ export default function Player() {
           </span>
           <span className="l">SLEEP</span>
         </button>
-        <button className="player-util-cell" onClick={openAddBookmark}>
-          <span className="v">+</span>
-          <span className="l">BOOKMARK</span>
-        </button>
+        {!isEpisode && (
+          <button className="player-util-cell" onClick={openAddBookmark}>
+            <span className="v">+</span>
+            <span className="l">BOOKMARK</span>
+          </button>
+        )}
         <button className="player-util-cell" onClick={openGoTo}>
           <span className="v">⌖</span>
           <span className="l">GO TO</span>
@@ -423,16 +432,18 @@ export default function Player() {
         </div>
       )}
 
-      <div className="player-tabs">
+      {isEpisode && book!.description && <p className="player-episode-notes">{book!.description}</p>}
+
+      {!isEpisode && <div className="player-tabs">
         <button className={`player-tab ${activeTab === "chapters" ? "active" : ""}`} onClick={() => setActiveTab("chapters")}>
           Chapters
         </button>
         <button className={`player-tab ${activeTab === "bookmarks" ? "active" : ""}`} onClick={() => setActiveTab("bookmarks")}>
           Bookmarks{bookmarks.length > 0 ? ` (${bookmarks.length})` : ""}
         </button>
-      </div>
+      </div>}
 
-      {activeTab === "chapters" ? (
+      {isEpisode ? null : activeTab === "chapters" ? (
         chapters.length > 0 ? (
           <div className="player-tab-list">
             {chapters.map((c, i) => (
@@ -478,9 +489,11 @@ export default function Player() {
         <p className="sub" style={{ padding: "0.6rem 0.1rem" }}>No bookmarks yet.</p>
       )}
 
-      <button className="player-discard" onClick={discardProgress} disabled={discarding}>
-        {discarding ? "Discarding…" : "Discard audiobook progress"}
-      </button>
+      {!isEpisode && (
+        <button className="player-discard" onClick={discardProgress} disabled={discarding}>
+          {discarding ? "Discarding…" : "Discard audiobook progress"}
+        </button>
+      )}
 
       {goToOpen && (
         <div className="player-dialog-backdrop" onClick={() => setGoToOpen(false)}>
