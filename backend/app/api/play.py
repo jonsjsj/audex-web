@@ -43,10 +43,25 @@ async def play(
     ]
     if not chapters:
         chapters = await synthesized_chapters(abs_id)   # no markers in the file: use the ones Codex heard
+    duration = sum(t.get("duration", 0.0) for t in tracks)
+    resume = session.get("currentTime", 0.0)
+    # A finished book starts again from the beginning instead of sitting at the end (like the Audex app). Finished =
+    # ABS's flag OR within the last ~0.5% / 30 s — the flag doesn't always survive syncing between clients.
+    restarted = False
+    try:
+        prog = await abs_client.get_progress(conn.base_url, conn.token, abs_id) or {}
+    except (AbsError, httpx.HTTPError):
+        prog = {}
+    if finished_audio(prog, resume, duration):
+        restarted = True
     return {
         "sessionId": session["id"],
-        "currentTimeS": session.get("currentTime", 0.0),
-        "durationS": sum(t.get("duration", 0.0) for t in tracks),
+        "currentTimeS": 0.0 if restarted else resume,
+        # Where Audiobookshelf holds the book — the place this device "knows", so the first save from the start
+        # isn't mistaken for another device having moved on (progress_guard).
+        "serverTimeS": resume,
+        "restartedFinished": restarted,
+        "durationS": duration,
         "tracks": [
             {
                 "index": t.get("index", i),
@@ -61,6 +76,16 @@ async def play(
         ],
         "chapters": chapters,
     }
+
+
+def finished_audio(prog: dict, resume_s: float, duration_s: float) -> bool:
+    """Is this audiobook finished? ABS's flag, or its progress at 99.5%+, or the resume point within 30 s of the end."""
+    if prog.get("isFinished"):
+        return True
+    p = prog.get("progress")
+    if isinstance(p, (int, float)) and p >= 0.995:
+        return True
+    return bool(duration_s) and resume_s >= duration_s - 30
 
 
 class SyncBody(BaseModel):

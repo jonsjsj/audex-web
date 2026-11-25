@@ -163,6 +163,10 @@ export interface PlayTrack {
 export interface PlaySession {
   sessionId: string;
   currentTimeS: number;
+  /** Where Audiobookshelf holds the book (differs from currentTimeS when a finished book restarts). */
+  serverTimeS?: number;
+  /** The book was finished, so it starts again from the beginning. */
+  restartedFinished?: boolean;
   durationS: number;
   tracks: PlayTrack[];
   chapters: Chapter[];

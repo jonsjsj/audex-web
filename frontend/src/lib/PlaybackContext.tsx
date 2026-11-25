@@ -272,7 +272,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         setTrackIndex(index);
         setPositionS(s.currentTimeS);
         stateRef.current.lastSyncPos = s.currentTimeS;
-        stateRef.current.knownServerS = s.currentTimeS;
+        stateRef.current.knownServerS = s.serverTimeS ?? s.currentTimeS;
+        if (s.restartedFinished) setResumeNotice("You'd finished this one — starting again from the beginning");
         pendingSeekRef.current = { withinS, thenPlay: false };
       })
       .catch((e) => {

@@ -7,6 +7,17 @@ data model may still change between releases. `VERSION` at the repo root is
 the source of truth CI stamps every image with; bump it alongside an entry
 here whenever there's something worth shipping.
 
+## [0.9.5] - 2026-11-25
+
+### Fixed
+- **The player no longer stops and jumps while you listen.** When another device (or another sync) saved a different
+  place, the player paused and moved there by itself — even when both places were the same ("22:09:00 (this one was
+  at 22:09:00)"). Now:
+  - the same place, give or take 30 seconds, isn't a move at all: it just carries on;
+  - a really different place keeps playing here and asks — "Your place moved on another device: Go there / Stay
+    here", on whatever page you're on. "Stay here" saves your place over the other device's.
+- **Go back.** After moving to another device's place, the player offers "Go back to 22:09:00" to return in one tap.
+
 ## [0.9.4] - 2026-11-06
 
 ### Changed

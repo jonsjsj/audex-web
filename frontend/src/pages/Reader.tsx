@@ -108,6 +108,8 @@ const KEY_PREV = "audex-prev";
 const KEY_ESCAPE = "audex-escape";
 const KEY_FULLSCREEN = "audex-fullscreen";
 const KEY_BOOKMARK = "audex-bookmark";
+/** At or past this much of the book it counts as finished: it reopens from the start. */
+const FINISHED_FRACTION = 0.995;
 const KEYBOARD_PERIPHERALS = [
   { type: KEY_NEXT, keyCombos: [{ keyCode: 39 }, { keyCode: 34 }, { keyCode: 32 }] }, // →  PageDown  Space
   { type: KEY_PREV, keyCombos: [{ keyCode: 37 }, { keyCode: 33 }, { keyCode: 32, shift: true }] }, // ←  PageUp  Shift+Space
@@ -467,7 +469,11 @@ export default function Reader() {
           // edition's saved progress (see library.py _share_twin_progress), so
           // a book you read in another app — or listened to — opens where you are.
           const savedFraction = Math.max(positionRes.progress ?? 0, detail?.ebookProgress ?? 0);
-          if (saved && Math.abs(totalOf(saved) - savedFraction) <= POSITION_DISAGREE) {
+          if (savedFraction >= FINISHED_FRACTION || (detail?.isFinished && savedFraction > 0.9)) {
+            // A finished book reopens from the start (like the Audex app) instead of on its last page.
+            initialLocator = undefined;
+            resumeNote = "You'd finished this one — starting again from the beginning";
+          } else if (saved && Math.abs(totalOf(saved) - savedFraction) <= POSITION_DISAGREE) {
             initialLocator = saved; // our own, precise position — still in step with the saved %
           } else if (savedFraction > 0.005) {
             // No locator we can open (the Audex app writes its own format) or one
@@ -480,7 +486,7 @@ export default function Reader() {
           // Listened further than you've read? Carry the audio position over —
           // exactly through the read-along map when there is one, otherwise by
           // fraction (the audio's % through the book is a close stand-in).
-          if (detail && detail.audioProgress > savedFraction + 0.01 && detail.audioProgress < 0.999) {
+          if (detail && savedFraction < FINISHED_FRACTION && detail.audioProgress > savedFraction + 0.01 && detail.audioProgress < 0.999) {
             const audioId = detail.numAudioFiles > 0 ? itemId! : detail.pairedItemId;
             const map = audioId ? await api.readAlongMap(audioId).catch(() => null) : null;
             const exact = map ? progressionAt(map, detail.audioTimeS) : null;
