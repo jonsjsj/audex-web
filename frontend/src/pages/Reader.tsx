@@ -493,7 +493,13 @@ export default function Reader() {
           // Listened further than you've read? Carry the audio position over —
           // exactly through the read-along map when there is one, otherwise by
           // fraction (the audio's % through the book is a close stand-in).
-          if (detail && savedFraction < FINISHED_FRACTION && detail.audioProgress > savedFraction + 0.01 && detail.audioProgress < 0.999) {
+          // Also when the saved % only got ahead of the saved page by LISTENING (the ebook keeps pace with the audio,
+          // ebook_pace.py): the % then equals the audio's, and the map puts you on the very sentence.
+          const pageInStep = !!saved && Math.abs(totalOf(saved) - savedFraction) <= POSITION_DISAGREE;
+          const audioLeads =
+            !!detail &&
+            (detail.audioProgress > savedFraction + 0.01 || (!pageInStep && detail.audioProgress >= savedFraction - 0.002));
+          if (detail && !resumeNote && audioLeads && detail.audioProgress > 0.005 && detail.audioProgress < 0.999) {
             const audioId = detail.numAudioFiles > 0 ? itemId! : detail.pairedItemId;
             const map = audioId ? await api.readAlongMap(audioId).catch(() => null) : null;
             const exact = map ? progressionAt(map, detail.audioTimeS) : null;

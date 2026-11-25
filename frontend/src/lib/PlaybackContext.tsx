@@ -179,7 +179,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   // `knownServerS` is the position Audiobookshelf held when we last looked or wrote — sent with every save so the
   // server can refuse to replace a newer place another device has saved (progress_guard.py). `dirty` is "played or
   // moved since the last confirmed save".
-  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false });
+  const stateRef = useRef({ timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "" });
   // The latest of everything an event listener or timer (registered once) needs, so none runs on a stale render.
   const itemIdRef = useRef<string | null>(null);
   const isPlayingRef = useRef(false);
@@ -237,6 +237,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         timeListenedS: prev.timeListenedS,
         durationS: prev.durationS,
         knownServerS: prev.knownServerS,
+        ebookItemId: prev.ebookItemId || undefined,
       });
     }
     if (seekSaveTimerRef.current) clearTimeout(seekSaveTimerRef.current);
@@ -249,7 +250,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setMovedFrom(null);
     explicitJumpRef.current = false;
     autoResumedRef.current = false;
-    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false };
+    stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false, ebookItemId: "" };
     setSyncStatus({ savedAt: null, failing: false });
     lastCheckRef.current = Date.now();
 
@@ -268,6 +269,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
         if (prefs) setSpeed(prefs.playbackSpeed);
         stateRef.current.sessionId = s.sessionId;
         stateRef.current.durationS = s.durationS;
+        // The ebook of this work (same item, or its paired one): its saved % keeps pace as you listen (server side).
+        stateRef.current.ebookItemId = b.hasEbook ? newItemId : (b.pairedItemId ?? "");
         const { index, withinS } = locate(s.tracks, s.currentTimeS);
         setTrackIndex(index);
         setPositionS(s.currentTimeS);
@@ -305,7 +308,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const st = stateRef.current;
       const id = itemIdRef.current;
       if (!st.sessionId || !id) return;
-      closeBeacon(id, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS, knownServerS: st.knownServerS });
+      closeBeacon(id, { sessionId: st.sessionId, currentTimeS: positionRef.current, timeListenedS: st.timeListenedS, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined });
     };
     window.addEventListener("pagehide", onUnload);
     return () => window.removeEventListener("pagehide", onUnload);
@@ -322,7 +325,7 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     if (elsewhereRef.current && !opts.beacon) return;
     const pos = positionRef.current;
     const listened = Math.max(0, pos - st.lastSyncPos);
-    const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS };
+    const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS, ebookItemId: st.ebookItemId || undefined };
     const prevLast = st.lastSyncPos;
     st.timeListenedS += listened;
     st.lastSyncPos = pos;

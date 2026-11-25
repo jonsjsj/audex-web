@@ -288,6 +288,8 @@ export interface PlaySyncBody {
   timeListenedS: number;
   durationS?: number;
   knownServerS?: number;
+  /** The work's ebook (this item or its pair): its saved % is nudged forward to keep pace with the audio. */
+  ebookItemId?: string;
 }
 export interface PlaySyncResult {
   ok: true;

@@ -235,6 +235,16 @@ async def save_ebook_progress(base_url: str, token: str, item_id: str, *, ebook_
         raise AbsError("Couldn't save your reading position.")
 
 
+async def bump_ebook_progress(base_url: str, token: str, item_id: str, ebook_progress: float) -> None:
+    """PATCH only `ebookProgress` — ABS merges it onto the existing record, so the saved page locator (and any
+    audio position on a combined item) is untouched. Used by the listen-keeps-pace mirror (ebook_pace.py)."""
+    body = {"ebookProgress": max(0.0, min(1.0, ebook_progress))}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.patch(f"{_base(base_url)}/api/me/progress/{item_id}", headers=_auth(token), json=body)
+    if r.status_code != 200:
+        raise AbsError("Couldn't update the ebook's progress.")
+
+
 # ─── Bookmarks ──────────────────────────────────────────────────────────────
 # NOTE on confidence: unlike everything above, these three write endpoints
 # are NOT independently confirmed against a live server this session (no

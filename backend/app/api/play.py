@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.chapters import synthesized_chapters
 from app.api.connections import list_connections, resolve
 from app.api.deps import get_codex_token, get_current_identity
-from app.core import abs_client, activity, codex_client
+from app.core import abs_client, activity, codex_client, ebook_pace
 from app.core.progress_guard import AUDIO_TOLERANCE_S, moved_elsewhere
 from app.core.abs_client import AbsError
 from app.core.config import settings
@@ -96,6 +96,30 @@ class SyncBody(BaseModel):
     # The position this device last knew Audiobookshelf held: what it loaded, or what it last saved. If the stored
     # one is no longer that, another device has saved since and this older one mustn't replace it (progress_guard.py).
     knownServerS: float | None = None
+    # The work's ebook (this item or its pair) — its saved % keeps pace with the audio (ebook_pace.py).
+    ebookItemId: str | None = None
+
+
+async def _keep_ebook_pace(identity: Identity, db: AsyncSession, item_id: str, conn, abs_id: str, body: SyncBody,
+                           force: bool = False) -> None:
+    """Best-effort: nudge the ebook's saved % forward to the audio's. Never fails the sync."""
+    if not body.ebookItemId or not body.durationS or body.durationS <= 0:
+        return
+    if not ebook_pace.due((identity.id, body.ebookItemId), force=force):
+        return
+    try:
+        if body.ebookItemId == item_id:
+            econn, eabs = conn, abs_id
+        else:
+            econn, eabs = await resolve(identity, db, body.ebookItemId)
+        prog = await abs_client.get_progress(econn.base_url, econn.token, eabs) or {}
+        if prog.get("isFinished") and body.ebookItemId != item_id:
+            return  # a finished ebook stays finished
+        target = ebook_pace.pace_target(prog.get("ebookProgress"), body.currentTimeS / body.durationS)
+        if target is not None:
+            await abs_client.bump_ebook_progress(econn.base_url, econn.token, eabs, target)
+    except (AbsError, HTTPException, httpx.HTTPError):
+        pass
 
 
 async def _moved_elsewhere(conn, abs_id: str, body: SyncBody) -> float | None:
@@ -152,6 +176,7 @@ async def sync(
         )
         if not ok:
             await activity.record(identity.id, "codex", "Send listening position", False, why, dedupe_s=600)
+    await _keep_ebook_pace(identity, db, item_id, conn, abs_id, body)
     return {"ok": True, "serverTimeS": body.currentTimeS}
 
 
@@ -187,6 +212,7 @@ async def close(
         reason = activity.describe_error(e) if isinstance(e, httpx.HTTPError) else str(e)
         await activity.record(identity.id, "audiobookshelf", "Finish listening session", False, reason)
         raise HTTPException(502, f"Couldn't save your position to Audiobookshelf: {reason}")
+    await _keep_ebook_pace(identity, db, item_id, conn, abs_id, body, force=True)
     mins = int(body.currentTimeS // 60)
     await activity.record(identity.id, "audiobookshelf", "Listening position saved", True, f"at {mins // 60}h {mins % 60:02d}m")
     if codex_token and conn.is_primary:
