@@ -215,7 +215,19 @@ export default function Player() {
         </div>
       </div>
 
-      {resumeNotice && <p className="player-resume-notice">{resumeNotice}</p>}
+      {resumeNotice && (
+        <p className="player-resume-notice">
+          {resumeNotice}
+          {playback.movedFrom !== null && (
+            <>
+              {" "}
+              <button className="player-resume-back" onClick={playback.goBack}>
+                Go back to {formatTime(playback.movedFrom)}
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {syncStatus.failing ? (
         <p className="player-sync-status is-failing" role="status">
           Your place isn't reaching the server — retrying{syncStatus.savedAt ? ` (last saved ${new Date(syncStatus.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})` : ""}

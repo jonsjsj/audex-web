@@ -83,6 +83,13 @@ interface PlaybackState {
   bookmarks: Bookmark[];
   resumeNotice: string | null;
   syncStatus: SyncStatus;
+  /** Another device saved a different place: where it is and where this tab was. Answered with goElsewhere / stayHere. */
+  elsewhere: { serverS: number; hereS: number } | null;
+  goElsewhere: () => void;
+  stayHere: () => void;
+  /** Where this tab was before it moved to another device's place (null when it hasn't), and the way back. */
+  movedFrom: number | null;
+  goBack: () => void;
   readAlong: ReturnType<typeof useReadAlong>;
   audioRef: React.RefObject<HTMLAudioElement>;
   // Not React.RefObject<number> — that type allows `current: null`, which
@@ -146,6 +153,13 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   const [sleepRemainingS, setSleepRemainingS] = useState<number | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  // Another device saved a different place while this one was open: ASK (Go there / Stay here) — never move or stop
+  // what is playing here on its own. hereS is where this tab was when it found out.
+  const [elsewhere, setElsewhere] = useState<{ serverS: number; hereS: number } | null>(null);
+  const elsewhereRef = useRef<{ serverS: number; hereS: number } | null>(null);
+  // Where this tab was before it moved to another device's place — so you can go straight back.
+  const [movedFrom, setMovedFrom] = useState<number | null>(null);
+  elsewhereRef.current = elsewhere;
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ savedAt: null, failing: false });
 
   // Enabled when this item has its own ebook, OR a DIFFERENT item is the
@@ -231,6 +245,8 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setError(null);
     setResumeNotice(null);
+    setElsewhere(null);
+    setMovedFrom(null);
     explicitJumpRef.current = false;
     autoResumedRef.current = false;
     stateRef.current = { timeListenedS: 0, lastSyncPos: 0, sessionId: "", durationS: 0, knownServerS: 0, dirty: false };
@@ -300,6 +316,9 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     const id = itemIdRef.current;
     const st = stateRef.current;
     if (!id || !st.sessionId) return;
+    // Waiting for your answer to "another device moved on": saving now would only be refused again. The listening
+    // time keeps adding up and is saved with your answer.
+    if (elsewhereRef.current && !opts.beacon) return;
     const pos = positionRef.current;
     const listened = Math.max(0, pos - st.lastSyncPos);
     const body: PlaySyncBody = { sessionId: st.sessionId, currentTimeS: pos, timeListenedS: listened, durationS: st.durationS, knownServerS: st.knownServerS };
@@ -317,8 +336,17 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const r = await api.sync(id, body);
       if (itemIdRef.current !== id || stateRef.current !== st) return; // switched book meanwhile
       if (r.skipped && r.serverTimeS !== undefined) {
-        audioRef.current?.pause();
-        adoptServerPosition(r.serverTimeS, "Your place moved on another device, so this one stopped and followed");
+        // Not saved: another device (or another sync) wrote a place since this tab last looked.
+        st.lastSyncPos = prevLast;
+        st.timeListenedS -= listened;
+        st.dirty = true;
+        if (Math.abs(r.serverTimeS - pos) <= MOVED_ELSEWHERE_S) {
+          // It's the same place (give or take) — nothing moved: carry on and save again on the next tick.
+          st.knownServerS = r.serverTimeS;
+          return;
+        }
+        // A really different place: keep playing here and ASK — never stop or jump by itself.
+        setElsewhere({ serverS: r.serverTimeS, hereS: pos });
         return;
       }
       st.knownServerS = pos;
@@ -339,10 +367,42 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     const from = positionRef.current;
     st.knownServerS = serverS;
     seekTo(serverS, { fromServer: true });
+    setMovedFrom(from);
     setResumeNotice(`${lead} — ${formatTime(serverS)} (this one was at ${formatTime(from)})`);
   }
 
-  /** Asks Audiobookshelf where the book is now; when another device has moved it, this tab follows. Resolves true
+  /** "Go there": move this tab to the other device's place. */
+  function goElsewhere() {
+    const e = elsewhereRef.current;
+    setElsewhere(null);
+    if (!e) return;
+    stateRef.current.lastSyncPos = e.serverS;
+    adoptServerPosition(e.serverS, "Moved to your other device's place");
+  }
+
+  /** "Go back": return to where this tab was before it moved; that place is saved over the other device's. */
+  function goBack() {
+    const from = movedFrom;
+    setMovedFrom(null);
+    setResumeNotice(null);
+    if (from === null) return;
+    stateRef.current.lastSyncPos = from;
+    seekTo(from);
+    stateRef.current.dirty = true;
+  }
+
+  /** "Stay here": keep this place — it replaces the other device's saved one right away. */
+  function stayHere() {
+    const e = elsewhereRef.current;
+    setElsewhere(null);
+    if (!e) return;
+    stateRef.current.knownServerS = e.serverS;   // the server now accepts this tab's place over it
+    stateRef.current.dirty = true;
+    elsewhereRef.current = null;
+    void syncNow();
+  }
+
+  /** Asks Audiobookshelf where the book is now; when another device has moved it, this tab asks whether to go there. Resolves true
    *  when it moved. Never runs while audio is playing here (the server's check covers that case). */
   async function pickUp(): Promise<boolean> {
     const id = itemIdRef.current;
@@ -354,7 +414,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
       const p = await api.audioPosition(id);
       if (itemIdRef.current !== id || stateRef.current !== st || p.currentTimeS === null) return false;
       if (Math.abs(p.currentTimeS - st.knownServerS) <= MOVED_ELSEWHERE_S) return false;
-      adoptServerPosition(p.currentTimeS, "Continued from your other device");
+      if (Math.abs(p.currentTimeS - positionRef.current) <= MOVED_ELSEWHERE_S) {
+        st.knownServerS = p.currentTimeS;   // the other device is where this one already is
+        return false;
+      }
+      setElsewhere({ serverS: p.currentTimeS, hereS: positionRef.current });
       return true;
     } catch {
       return false;
@@ -682,6 +746,11 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
     bookmarks,
     resumeNotice,
     syncStatus,
+    elsewhere,
+    goElsewhere,
+    stayHere,
+    movedFrom,
+    goBack,
     readAlong,
     audioRef,
     positionRef,
@@ -708,6 +777,27 @@ export function PlaybackProvider({ children }: { children: ReactNode }) {
   return (
     <PlaybackContext.Provider value={value}>
       {children}
+      {/* Another device moved on: ask, wherever you are in the app (playback keeps going meanwhile). */}
+      {elsewhere && (
+        <div className="player-dialog-backdrop" role="alertdialog" aria-label="Your place moved on another device">
+          <div className="player-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Your place moved on another device</h3>
+            <p className="player-elsewhere-text">
+              {book?.title ? <><strong>{book.title}</strong><br /></> : null}
+              Your other device is at <strong>{formatTime(elsewhere.serverS)}</strong>; here you're at{" "}
+              <strong>{formatTime(elsewhere.hereS)}</strong>.
+            </p>
+            <div className="player-dialog-actions">
+              <button className="btn btn-secondary" style={{ width: "auto" }} onClick={stayHere}>
+                Stay here
+              </button>
+              <button className="btn btn-primary" style={{ width: "auto" }} onClick={goElsewhere} autoFocus>
+                Go there
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Rendered ONCE, here, outside every route — this is what makes
           playback survive navigating around the app. */}
       <audio
