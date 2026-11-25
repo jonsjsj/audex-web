@@ -4,7 +4,7 @@ import { AbsServerInfo, ActivityEntry, api, DiagnosticCheck, UpdateCheck } from 
 import { useShell } from "../components/Shell";
 import { BACK_UP_CHOICES, loadBackUpOnResumeS, saveBackUpOnResumeS } from "../lib/playbackPrefs";
 import { setSwitch, useSwitches } from "../lib/prefs";
-import { InfoLabel } from "../components/InfoTip";
+import { InfoLabel, WithInfo } from "../components/InfoTip";
 
 interface ChangelogEntry {
   version: string;
@@ -322,13 +322,15 @@ export default function Settings() {
       </section>
 
       <section className="settings-section">
-        <div className="settings-section-head">
-          <h2 className="settings-section-title">Audiobookshelf servers</h2>
-        </div>
-        <p className="settings-help">
+        <WithInfo
+          className="settings-section-head-info"
+          head={<h2 className="settings-section-title">Audiobookshelf servers</h2>}
+          what="more servers"
+          noteClass="settings-help"
+        >
           Connect more than one Audiobookshelf server to see every library in one place — the Library, Series,
           Authors and Narrators views combine them, and each server keeps its own sign-in.
-        </p>
+        </WithInfo>
         {(servers ?? []).map((s) => (
           <div className="settings-row" key={s.key || "primary"}>
             <div>
@@ -460,13 +462,10 @@ export default function Settings() {
         {codexError && <div className="error" style={{ marginTop: "0.6rem" }}>{codexError}</div>}
         {me.codexConfigured && (
           <div className="settings-row" style={{ marginTop: "0.6rem" }}>
-            <div>
-              <div className="settings-row-label">Use Codex's metadata</div>
-              <div className="settings-row-sub">
-                Show the author, series, year and description you've fixed in Codex instead of Audiobookshelf's raw
-                values (needs a Codex that serves it; falls back to Audiobookshelf on any problem).
-              </div>
-            </div>
+            <InfoLabel label="Use Codex's metadata">
+              Show the author, series, year and description you've fixed in Codex instead of Audiobookshelf's raw
+              values (needs a Codex that serves it; falls back to Audiobookshelf on any problem).
+            </InfoLabel>
             <input
               type="checkbox"
               aria-label="Use Codex's metadata"

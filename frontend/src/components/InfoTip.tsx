@@ -40,3 +40,29 @@ export function InfoButton({ open, onToggle, what }: { open: boolean; onToggle: 
 export function InfoText({ open, children }: { open: boolean; children: ReactNode }) {
   return open ? <div className="info-text">{children}</div> : null;
 }
+
+/** Anything (a title, a button) with an ⓘ beside it; the explanation opens underneath. */
+export function WithInfo({
+  head,
+  what,
+  children,
+  noteClass = "info-text",
+  className = "",
+}: {
+  head: ReactNode;
+  what: string;
+  children: ReactNode;
+  noteClass?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`with-info ${className}`}>
+      <div className="info-label-row">
+        {head}
+        <InfoButton open={open} onToggle={() => setOpen((v) => !v)} what={what} />
+      </div>
+      {open && <div className={noteClass}>{children}</div>}
+    </div>
+  );
+}

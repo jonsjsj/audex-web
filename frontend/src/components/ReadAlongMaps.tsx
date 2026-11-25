@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ReadAlongMapVersion, ReadAlongMaps as Maps } from "../api/client";
 import { formatDayTime } from "../lib/dates";
+import { WithInfo } from "./InfoTip";
 
 const SOURCE: Record<string, string> = {
   transcribe: "Listened to the audio",
@@ -82,10 +83,9 @@ export default function ReadAlongMaps({
 
   return (
     <div className="ra-maps">
-      <div className="reader-panel-title">Read-along maps</div>
-      <p className="reader-panel-note">
+      <WithInfo head={<div className="reader-panel-title">Read-along maps</div>} what="a read-along map" noteClass="reader-panel-note">
         A map says where every sentence is spoken, so the text and the audio line up. Each map is kept with the date it was made.
-      </p>
+      </WithInfo>
       {error && <p className="reader-ra-hint reader-ra-error">{error}</p>}
       {!data && !error && <p className="reader-panel-empty">Loading…</p>}
       {data && data.versions.length === 0 && <p className="reader-panel-empty">This book has no map yet.</p>}
@@ -115,10 +115,17 @@ export default function ReadAlongMaps({
       {note && <p className="reader-panel-note ra-map-note">{note}</p>}
 
       <div className="reader-panel-title ra-map-new-title">Make a new map</div>
-      <button className="reader-panel-item reader-panel-add" disabled={busy} onClick={() => void ask("realign")}>
-        Re-align (seconds)
-      </button>
-      <p className="reader-panel-note">Uses the transcript saved when the book was first listened to. Quick, and picks up changes to the ebook.</p>
+      <WithInfo
+        head={
+          <button className="reader-panel-item reader-panel-add" disabled={busy} onClick={() => void ask("realign")}>
+            Re-align (seconds)
+          </button>
+        }
+        what="re-aligning"
+        noteClass="reader-panel-note"
+      >
+        Uses the transcript saved when the book was first listened to. Quick, and picks up changes to the ebook.
+      </WithInfo>
       {confirmTranscribe ? (
         <div className="ra-map-confirm">
           <p className="reader-panel-note">This uses the server's graphics card for hours. The current maps stay as they are.</p>
@@ -137,11 +144,19 @@ export default function ReadAlongMaps({
           </button>
         </div>
       ) : (
-        <button className="reader-panel-item reader-panel-add" disabled={busy} onClick={() => setConfirmTranscribe(true)}>
-          Re-transcribe (hours)
-        </button>
+        <WithInfo
+          head={
+            <button className="reader-panel-item reader-panel-add" disabled={busy} onClick={() => setConfirmTranscribe(true)}>
+              Re-transcribe (hours)
+            </button>
+          }
+          what="re-transcribing"
+          noteClass="reader-panel-note"
+        >
+          Listens to the whole audiobook again. Use it when the current maps are off. Only a Codex admin can delete old maps
+          or choose the default for everyone.
+        </WithInfo>
       )}
-      <p className="reader-panel-note">Listens to the whole audiobook again. Use it when the current maps are off. Only a Codex admin can delete old maps or choose the default for everyone.</p>
     </div>
   );
 }

@@ -2332,6 +2332,12 @@ input:focus {
   align-items: center;
   gap: 0.45rem;
 }
+.settings-section-head-info {
+  margin-bottom: 0.7rem;
+}
+.settings-section-head-info .settings-section-title {
+  margin: 0;
+}
 .info-text {
   font-size: 0.82rem;
   color: var(--ink-soft);

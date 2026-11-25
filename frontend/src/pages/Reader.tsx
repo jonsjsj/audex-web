@@ -48,6 +48,7 @@ import {
   ReaderBookmark,
 } from "../lib/readerBookmarks";
 import { madeAt } from "../lib/bookmarkTitle";
+import { WithInfo } from "../components/InfoTip";
 
 // @readium/navigator's HttpFetcher.get() resolves each Link's href against
 // THIS base itself (WHATWG URL resolution — see epub.py's build_manifest()
@@ -1479,7 +1480,9 @@ export default function Reader() {
               )}
             </div>
             {appearance.font === "custom" && (
-              <p className="reader-panel-note">Any font installed on this device. If it isn't, the book falls back to a serif font.</p>
+              <WithInfo head={<span className="reader-panel-note">Font name</span>} what="a custom font" noteClass="reader-panel-note">
+                Any font installed on this device. If it isn't, the book falls back to a serif font.
+              </WithInfo>
             )}
 
             <div className="reader-ap-label">Spacing</div>
@@ -1606,10 +1609,17 @@ export default function Reader() {
                 <div className="reader-ra-bar" aria-hidden>
                   <div style={{ width: `${Math.round((raStatus!.progress ?? 0) * 100)}%` }} />
                 </div>
-                <p className="reader-panel-note">
-                  {raStatus!.etaSeconds != null ? `About ${Math.max(1, Math.round(raStatus!.etaSeconds / 60))} min left. ` : ""}
+                <WithInfo
+                  head={
+                    <span className="reader-panel-note">
+                      {raStatus!.etaSeconds != null ? `About ${Math.max(1, Math.round(raStatus!.etaSeconds / 60))} min left` : "Working on it"}
+                    </span>
+                  }
+                  what="aligning"
+                  noteClass="reader-panel-note"
+                >
                   This can take a while for a long book — you can keep reading, and it'll be ready next time you look.
-                </p>
+                </WithInfo>
               </>
             ) : raFailed ? (
               <>
@@ -1624,11 +1634,10 @@ export default function Reader() {
               </>
             ) : (
               <>
-                <p className="reader-ra-line">Not aligned yet.</p>
-                <p className="reader-panel-empty">
+                <WithInfo head={<p className="reader-ra-line">Not aligned yet.</p>} what="aligning" noteClass="reader-panel-empty">
                   Aligning matches the audiobook to the text, so you can switch between listening and reading at exactly the same spot,
-                  and the page can follow the narration.
-                </p>
+                  the page can follow the narration and each word lights up as it's spoken.
+                </WithInfo>
                 <button className="reader-panel-item reader-panel-add" onClick={act(() => void readAlong.requestBuild(hasAudio ? undefined : itemId))}>
                   Request alignment
                 </button>
@@ -1639,7 +1648,10 @@ export default function Reader() {
         )}
         {panel === "bookmarks" && (
           <div className="reader-panel" role="dialog" aria-label="Bookmarks">
-            <div className="reader-panel-title">Bookmarks</div>
+            <WithInfo head={<div className="reader-panel-title">Bookmarks</div>} what="bookmarks" noteClass="reader-panel-note">
+              Saved to Audiobookshelf with the time and where you made them, so the Audex app shows them too. Tap a mark on
+              the slider to jump to it; the faint line is the furthest you've reached.
+            </WithInfo>
             <button className="reader-panel-item reader-panel-add" onClick={act(() => void addBookmarkHere())} disabled={!store}>
               ＋ Bookmark this spot ({Math.round(fraction * 100)}%)
             </button>
@@ -1661,11 +1673,6 @@ export default function Reader() {
                   </button>
                 </div>
               ))
-            )}
-            {store && (
-              <p className="reader-panel-note">
-                Saved to Audiobookshelf with the time and where you made them, so the Audex app shows them too.
-              </p>
             )}
           </div>
         )}

@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, Book, BookDetail as BookDetailModel } from "../api/client";
 import { useShell } from "../components/Shell";
 import ArrMonitor from "../components/ArrMonitor";
+import { WithInfo } from "../components/InfoTip";
 
 function formatDuration(s: number | null): string | null {
   if (!s || s <= 0) return null;
@@ -94,8 +95,10 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
 
   return (
     <form className="book-detail-section book-edit" onSubmit={save}>
-      <div className="l">EDIT DETAILS</div>
-      <p className="sub">Saved to Audiobookshelf and Codex, so Audex and Codex pick it up too.</p>
+      <WithInfo head={<div className="l">EDIT DETAILS</div>} what="editing details" noteClass="sub">
+        Saved to Audiobookshelf and Codex, so Audex and Codex pick it up too. Giving the ebook and the audiobook the
+        same ASIN or ISBN is the surest way to keep them one book.
+      </WithInfo>
       <label htmlFor="ed-title">Title</label>
       <input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
       <label htmlFor="ed-sub">Subtitle</label>
@@ -142,7 +145,6 @@ function EditDetails({ book, onSaved, onCancel }: { book: BookDetailModel; onSav
       <input id="ed-genres" value={genres} onChange={(e) => setGenres(e.target.value)} />
       <label htmlFor="ed-desc">Description</label>
       <textarea id="ed-desc" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
-      <p className="sub">Giving the ebook and the audiobook the same ASIN or ISBN is the surest way to keep them one book.</p>
       {book.pairedItemId && (
         <label className="book-edit-check">
           <input type="checkbox" checked={alsoPaired} onChange={(e) => setAlsoPaired(e.target.checked)} />
@@ -204,10 +206,9 @@ function MergePicker({ book, onDone, onCancel }: { book: BookDetailModel; onDone
 
   return (
     <div className="book-detail-section book-edit">
-      <div className="l">MERGE WITH {wantAudio ? "AUDIOBOOK" : "EBOOK"}</div>
-      <p className="sub">
+      <WithInfo head={<div className="l">MERGE WITH {wantAudio ? "AUDIOBOOK" : "EBOOK"}</div>} what="merging" noteClass="sub">
         Pick the {wantAudio ? "audiobook" : "ebook"} of this same book. Its details are updated in Audiobookshelf to match this one.
-      </p>
+      </WithInfo>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title or author" aria-label="Search" />
       {results.length === 0 && <p className="sub">No unmerged {wantAudio ? "audiobooks" : "ebooks"} match.</p>}
       {results.map((b) => (

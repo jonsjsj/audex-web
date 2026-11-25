@@ -5,6 +5,7 @@ import { usePlayback, formatTime } from "../lib/PlaybackContext";
 import { madeAt, parseTitle } from "../lib/bookmarkTitle";
 import { chapterIndexAt } from "../lib/chapters";
 import ReadAlongMaps from "../components/ReadAlongMaps";
+import { WithInfo } from "../components/InfoTip";
 
 const SKIP_S = 30;
 const FINISHED_FRACTION = 0.995;
@@ -399,12 +400,20 @@ export default function Player() {
               {readAlong.status.etaSeconds != null && <span className="t">~{formatTime(readAlong.status.etaSeconds)} left</span>}
             </div>
           ) : (
-            <button
-              className="player-readalong-build"
-              onClick={() => readAlong.requestBuild(book!.hasEbook ? undefined : book!.pairedItemId ?? undefined)}
+            <WithInfo
+              head={
+                <button
+                  className="player-readalong-build"
+                  onClick={() => readAlong.requestBuild(book!.hasEbook ? undefined : book!.pairedItemId ?? undefined)}
+                >
+                  Build read-along
+                </button>
+              }
+              what="read-along"
             >
-              Build read-along
-            </button>
+              Matches the audiobook to the ebook's text, so you can switch between listening and reading at the very same
+              spot, the page follows the narration and each word lights up as it's spoken.
+            </WithInfo>
           )}
           {readAlong.error && (
             <p className="error" style={{ margin: 0 }}>
