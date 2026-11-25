@@ -1183,6 +1183,25 @@ input:focus {
   inset: 0;
   pointer-events: none;
 }
+.player-scrub-furthest {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  width: 2px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  background: var(--ink);
+  opacity: 0.35;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.player-scrub-furthest::after {
+  content: "";
+  position: absolute;
+  inset: -4px -7px;
+}
 .player-scrub-mark {
   position: absolute;
   top: 50%;
@@ -1861,7 +1880,30 @@ input:focus {
   transform: translateY(-50%);
   border-radius: 2px;
   background: var(--accent);
-  pointer-events: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+/* A wider invisible hit area so a 3px mark is easy to tap. */
+.reader-tick::after,
+.reader-furthest::after {
+  content: "";
+  position: absolute;
+  inset: -6px -7px;
+}
+/* The furthest point reached (either format): faint, gone once the book is finished. */
+.reader-furthest {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  margin-left: -1px;
+  transform: translateY(-50%);
+  background: var(--ink);
+  opacity: 0.35;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
 .reader-tick.auto {
   background: var(--muted);

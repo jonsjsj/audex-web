@@ -206,6 +206,9 @@ export default function Reader() {
   const [progressPct, setProgressPct] = useState<number | null>(null);
   const [fraction, setFraction] = useState(0); // whole-book 0..1, drives the slider
   const [scrub, setScrub] = useState<number | null>(null); // slider value while dragging, before it's committed
+  // The furthest point reached in EITHER format (0..1), a faint mark on the slider to jump back to the tip.
+  // Hidden once the book is done — past the end, re-reading is free (Audex has the same).
+  const [furthest, setFurthest] = useState(0);
   const [chapterTitle, setChapterTitle] = useState<string | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0); // reading-order index of the chapter on screen
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -483,6 +486,10 @@ export default function Reader() {
           } else {
             initialLocator = saved;
           }
+          // The furthest either format has reached (none when finished and starting over).
+          if (savedFraction < FINISHED_FRACTION && !resumeNote) {
+            setFurthest(Math.max(savedFraction, detail && detail.audioProgress < FINISHED_FRACTION ? detail.audioProgress : 0));
+          }
           // Listened further than you've read? Carry the audio position over —
           // exactly through the read-along map when there is one, otherwise by
           // fraction (the audio's % through the book is a close stand-in).
@@ -560,6 +567,7 @@ export default function Reader() {
             lastTotalRef.current = total;
             progressionRef.current = total;
             setFraction(total);
+            setFurthest((f) => Math.max(f, total));
             setProgressPct(Math.round(total * 100));
             setChapterTitle(loc.title ?? null);
             const w = weightsRef.current;
@@ -932,6 +940,13 @@ export default function Reader() {
     void dropLeftOff(store, bookmarks, from)
       .then(refreshBookmarks)
       .catch(() => {});
+  }
+
+  /** Jump to a whole-book fraction (the furthest-reached mark). */
+  function goFraction(to: number) {
+    leftOffBeforeJump(to);
+    const target = locatorAtTotal(to);
+    if (target) navRef.current?.go(target, true, () => {});
   }
 
   function goBookmark(b: ReaderBookmark) {
@@ -1673,13 +1688,23 @@ export default function Reader() {
               }}
               aria-label="Reading progress"
             />
+            {furthest > 0 && furthest < FINISHED_FRACTION && furthest - shownFraction > 0.01 && (
+              <button
+                className="reader-furthest"
+                style={{ left: `calc(8px + (100% - 16px) * ${furthest})` }}
+                onClick={act(() => goFraction(furthest))}
+                title={`Furthest reached — ${Math.round(furthest * 100)}%`}
+                aria-label={`Jump to the furthest you've reached, ${Math.round(furthest * 100)}%`}
+              />
+            )}
             {bookmarks.map((b) => (
-              <span
+              <button
                 key={b.key}
                 className={`reader-tick ${b.auto ? "auto" : ""}`}
                 style={{ left: `calc(8px + (100% - 16px) * ${b.fraction})` }}
+                onClick={act(() => goBookmark(b))}
                 title={b.title}
-                aria-hidden
+                aria-label={`Jump to bookmark: ${b.title}`}
               />
             ))}
           </div>

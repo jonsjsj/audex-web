@@ -7,6 +7,7 @@ import { chapterIndexAt } from "../lib/chapters";
 import ReadAlongMaps from "../components/ReadAlongMaps";
 
 const SKIP_S = 30;
+const FINISHED_FRACTION = 0.995;
 // Decorative, not audio-derived — mirrors the native app's own fixed
 // waveform silhouette exactly (its source comments say the same: hand-tuned
 // from the design mockup, not real amplitude data).
@@ -45,6 +46,22 @@ export default function Player() {
   const [addingBookmark, setAddingBookmark] = useState(false);
   const [addBookmarkError, setAddBookmarkError] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
+  // The furthest point reached in either format (seconds): a faint mark on the scrubber to jump back to the tip.
+  // Gone once the book is finished, and not carried over when a finished book starts again.
+  const [furthestS, setFurthestS] = useState(0);
+  useEffect(() => {
+    setFurthestS(0);
+  }, [urlItemId]);
+  useEffect(() => {
+    const s = playback.session;
+    const b = playback.book;
+    if (!s || !b || playback.itemId !== urlItemId || s.restartedFinished) return;
+    const fromText = b.ebookProgress < FINISHED_FRACTION ? b.ebookProgress * s.durationS : 0;
+    setFurthestS((f) => Math.max(f, s.currentTimeS, fromText));
+  }, [playback.session, playback.book, playback.itemId, urlItemId]);
+  useEffect(() => {
+    if (playback.itemId === urlItemId) setFurthestS((f) => Math.max(f, playback.positionS));
+  }, [playback.positionS, playback.itemId, urlItemId]);
 
   // Starts (or confirms) playback for whatever book this URL names — a
   // no-op in the context if it's already the one loaded/loading.
@@ -171,6 +188,8 @@ export default function Player() {
   const currentChapter = chapters.find((c) => shown >= c.startS && shown < c.endS) ?? null;
   const progressFrac = session!.durationS > 0 ? shown / session!.durationS : 0;
   const litBars = Math.round(progressFrac * WAVEFORM_BARS.length);
+  const showFurthest =
+    session!.durationS > 0 && furthestS < session!.durationS * FINISHED_FRACTION && furthestS - shown > 60;
   const showJumpToReading = readingAheadS !== null && readingAheadS - shown > 20;
 
   return (
@@ -264,6 +283,17 @@ export default function Player() {
                 {chapters.slice(1).map((c) => (
                   <div key={c.id} className="player-scrub-tick" style={{ left: `${(c.startS / session!.durationS) * 100}%` }} />
                 ))}
+              </div>
+            )}
+            {showFurthest && (
+              <div className="player-scrub-marks">
+                <button
+                  className="player-scrub-furthest"
+                  style={{ left: `${(furthestS / session!.durationS) * 100}%` }}
+                  onClick={() => playback.seekTo(furthestS)}
+                  title={`Furthest reached — ${formatTime(furthestS)}`}
+                  aria-label={`Jump to the furthest you've reached, ${formatTime(furthestS)}`}
+                />
               </div>
             )}
             {session!.durationS > 0 && bookmarks.length > 0 && (
